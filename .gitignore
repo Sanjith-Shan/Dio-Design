@@ -2,6 +2,10 @@
 .env
 *.env
 
+# TLS certificates (generated locally)
+cert.pem
+key.pem
+
 # Python
 __pycache__/
 *.pyc

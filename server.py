@@ -56,6 +56,16 @@ GLB_EXPORT_PATH = os.getenv("GLB_EXPORT_PATH", "C:/tmp/dio_scene.glb")
 
 EXPORT_DEBOUNCE_SEC = 0.3
 
+# HTTPS
+USE_HTTPS = os.getenv("USE_HTTPS", "false").lower() == "true"
+SSL_CERT_FILE = os.getenv("SSL_CERT_FILE", "cert.pem")
+SSL_KEY_FILE = os.getenv("SSL_KEY_FILE", "key.pem")
+
+# IMU / controller
+IMU_SEND_INTERVAL = 0.02   # 50 Hz firmware rate
+GYRO_DEADZONE = 2.0        # deg/s — ignore noise below this
+GYRO_SCALE = 0.0008        # deg/s → Blender radians per tick
+
 # ─── Logging ──────────────────────────────────────────────────────────
 
 logging.basicConfig(
@@ -70,6 +80,10 @@ log = logging.getLogger("dio-hub")
 app = FastAPI(title="Dio Hub")
 ar_clients: list[WebSocket] = []
 last_export_time: float = 0
+pick_mode_active: bool = False
+pick_imu_origin: list = None
+PICK_ACCEL_DEADZONE = 0.05   # g
+PICK_MOVE_SCALE = 0.04       # g delta → Blender units
 
 # ─── System Prompt for the LLM ───────────────────────────────────────
 
@@ -429,8 +443,11 @@ for o in bpy.data.objects:
 # ─── Controller Input ─────────────────────────────────────────────────
 
 async def process_controller_input(data: dict):
+    global pick_mode_active, pick_imu_origin
+
     joy_y = data.get("joy_y", 0.0)
     buttons = data.get("buttons", {})
+    imu = data.get("imu", [])
 
     if abs(joy_y) > 0.1:
         scale_factor = 1.0 + (joy_y * 0.02)
@@ -448,6 +465,64 @@ async def process_controller_input(data: dict):
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, blender.execute_code, "import bpy\nbpy.ops.ed.redo()")
         await export_and_push_model()
+
+    # ─── Pick-up gesture (hold pick button + tilt to move model) ──────
+    if buttons.get("pick"):
+        if not pick_mode_active:
+            pick_mode_active = True
+            pick_imu_origin = imu[:3] if len(imu) >= 3 else [0.0, 0.0, 1.0]
+            await broadcast_json({"type": "pick_mode", "active": True})
+            log.info("Pick mode ON")
+        # Move model based on accelerometer delta from origin
+        if pick_imu_origin and len(imu) >= 3:
+            dx = imu[0] - pick_imu_origin[0]
+            dy = imu[1] - pick_imu_origin[1]
+            dz = imu[2] - pick_imu_origin[2]
+            dx = dx if abs(dx) > PICK_ACCEL_DEADZONE else 0.0
+            dy = dy if abs(dy) > PICK_ACCEL_DEADZONE else 0.0
+            dz = dz if abs(dz) > PICK_ACCEL_DEADZONE else 0.0
+            if abs(dx) > 0.001 or abs(dy) > 0.001 or abs(dz) > 0.001:
+                pick_code = (
+                    f"import bpy\n"
+                    f"for o in bpy.data.objects:\n"
+                    f"    if o.type=='MESH':\n"
+                    f"        o.location.x += {dx * PICK_MOVE_SCALE}\n"
+                    f"        o.location.y += {dz * PICK_MOVE_SCALE}\n"
+                    f"        o.location.z += {dy * PICK_MOVE_SCALE}\n"
+                    f"        break"
+                )
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, blender.execute_code, pick_code)
+                await export_and_push_model()
+    else:
+        if pick_mode_active:
+            pick_mode_active = False
+            pick_imu_origin = None
+            await broadcast_json({"type": "pick_mode", "active": False})
+            log.info("Pick mode OFF")
+
+        # ─── Gyro-driven rotation (only when not in pick mode) ────────
+        if len(imu) == 6:
+            gx, gy, gz = imu[3], imu[4], imu[5]
+            gx = gx if abs(gx) > GYRO_DEADZONE else 0.0
+            gy = gy if abs(gy) > GYRO_DEADZONE else 0.0
+            gz = gz if abs(gz) > GYRO_DEADZONE else 0.0
+            if abs(gx) > 0.01 or abs(gy) > 0.01 or abs(gz) > 0.01:
+                rx = gx * IMU_SEND_INTERVAL * GYRO_SCALE
+                ry = gy * IMU_SEND_INTERVAL * GYRO_SCALE
+                rz = gz * IMU_SEND_INTERVAL * GYRO_SCALE
+                imu_code = (
+                    f"import bpy\n"
+                    f"for o in bpy.data.objects:\n"
+                    f"    if o.type=='MESH':\n"
+                    f"        o.rotation_euler.x += {rx}\n"
+                    f"        o.rotation_euler.y += {ry}\n"
+                    f"        o.rotation_euler.z += {rz}\n"
+                    f"        break"
+                )
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, blender.execute_code, imu_code)
+                await export_and_push_model()
 
 
 class ControllerUDPProtocol(asyncio.DatagramProtocol):
@@ -552,4 +627,14 @@ async def startup():
 
 
 if __name__ == "__main__":
-    uvicorn.run("server:app", host=HUB_HOST, port=HUB_PORT, reload=False, log_level="info")
+    ssl_kwargs = {}
+    if USE_HTTPS:
+        cert_path = Path(SSL_CERT_FILE)
+        key_path = Path(SSL_KEY_FILE)
+        if cert_path.exists() and key_path.exists():
+            ssl_kwargs = {"ssl_certfile": str(cert_path), "ssl_keyfile": str(key_path)}
+            log.info(f"HTTPS enabled ({SSL_CERT_FILE})")
+        else:
+            log.warning("USE_HTTPS=true but cert/key not found. Generate with:")
+            log.warning("  openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes -subj '/CN=localhost'")
+    uvicorn.run("server:app", host=HUB_HOST, port=HUB_PORT, reload=False, log_level="info", **ssl_kwargs)
