@@ -693,6 +693,9 @@ async def ar_websocket(ws: WebSocket):
                 await push_versions_to_dashboard()
                 log.info(f"Scene state saved as version {version['version']}")
 
+            elif msg_type == "debug":
+                log.info(f"[PHONE] {message.get('message', '')}")
+
             elif msg_type == "ping":
                 await ws.send_text(json.dumps({"type": "pong"}))
 

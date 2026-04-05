@@ -489,6 +489,14 @@ function connectWS() {
 }
 function send(m){ if(state.ws?.readyState===1) state.ws.send(JSON.stringify(m)); }
 
+// Relay SPEECH: console.log messages to the hub terminal via WebSocket.
+const _origLog = console.log;
+console.log = function(...args) {
+  _origLog.apply(console, args);
+  const msg = args.join(' ');
+  if(msg.startsWith('SPEECH:')) send({type:'debug', message:msg});
+};
+
 let bubbleTO=null;
 function showBubble(t,ms=0){ dom.bubble.textContent=t; dom.bubble.classList.add('visible'); if(bubbleTO)clearTimeout(bubbleTO); if(ms>0)bubbleTO=setTimeout(hideBubble,ms); }
 function hideBubble(){ dom.bubble.classList.remove('visible'); }
