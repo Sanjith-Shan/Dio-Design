@@ -654,19 +654,22 @@ function exportSceneAsGLB() {
 // Voice
 function initVoice(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  console.log('SPEECH: initVoice called, SR available:', !!SR);
   if(!SR)return;
   const r=new SR(); r.continuous=true; r.interimResults=true; r.lang='en-US';
+  r.onstart=()=>{ console.log('SPEECH: recognition active'); };
   r.onresult=(e)=>{
     let fin='',int='';
     for(let i=e.resultIndex;i<e.results.length;i++){
       const t=e.results[i][0].transcript;
       if(e.results[i].isFinal) fin+=t; else int+=t;
     }
+    console.log('SPEECH: got result:', fin||int);
     dom.transcript.textContent=int||fin;
     if(fin){ send({type:'voice',text:fin.trim(),final:true}); dom.transcript.textContent=''; }
   };
-  r.onerror=(e)=>{ if(e.error==='not-allowed') showBubble('Mic access denied',3000); };
-  r.onend=()=>{ if(state.listening) try{r.start();}catch(x){} };
+  r.onerror=(e)=>{ console.log('SPEECH: error:', e.error); if(e.error==='not-allowed') showBubble('Mic access denied',3000); };
+  r.onend=()=>{ console.log('SPEECH: ended, restarting:', state.listening); if(state.listening) try{r.start();}catch(x){} };
   state.recognition=r;
 }
 function toggleMic(){
@@ -711,6 +714,17 @@ async function initXR(){
   anc.add(avatar.group);
   state.avatar=avatar; state.scene=scene; state.camera=cam; state.renderer=ren; state.reticle=ret;
 
+  // Start voice recognition NOW, while the "Enter AR" button click user gesture is still active.
+  // Must be before any await — Chrome Android requires a user gesture for SpeechRecognition.start().
+  initVoice();
+  if(state.recognition){
+    state.listening = true;
+    state.recognition.start();
+    console.log('SPEECH: recognition.start() called');
+    state.voiceAn.start();
+    dom.micBtn.classList.add('listening');
+  }
+
   try{
     const sess = await navigator.xr.requestSession('immersive-ar',{
       requiredFeatures:['hit-test','local'],
@@ -742,7 +756,14 @@ async function initXR(){
         if(anc2) send({type:'place_model',position:[anc2.position.x,anc2.position.y,anc2.position.z]});
       }
     });
-    sess.addEventListener('end',()=>{ state.xrSession=null; dom.landing.style.display='flex'; dom.overlay.classList.remove('active'); dom.startBtn.disabled=false; dom.startBtn.textContent='Enter AR'; });
+    sess.addEventListener('end',()=>{
+      state.xrSession=null; dom.landing.style.display='flex'; dom.overlay.classList.remove('active');
+      dom.startBtn.disabled=false; dom.startBtn.textContent='Enter AR';
+      if(state.recognition && state.listening){
+        state.listening=false; state.recognition.stop(); state.voiceAn.stop();
+        dom.micBtn.classList.remove('listening');
+      }
+    });
 
     let prev=0;
     ren.setAnimationLoop((time,frame)=>{
@@ -769,27 +790,7 @@ async function initXR(){
     });
 
     connectWS();
-
-    // Auto-start voice recognition immediately on XR session start.
-    // No tap needed — Dio is always listening inside AR.
-    initVoice();
-    if(state.recognition){
-      state.listening = true;
-      state.recognition.start();
-      state.voiceAn.start();
-      dom.micBtn.classList.add('listening');
-      state.avatar?.setListening();
-    }
-
-    sess.addEventListener('end',()=>{
-      // Stop recognition cleanly when XR ends
-      if(state.recognition && state.listening){
-        state.listening = false;
-        state.recognition.stop();
-        state.voiceAn.stop();
-        dom.micBtn.classList.remove('listening');
-      }
-    });
+    state.avatar?.setListening();
 
     document.addEventListener('touchstart',()=>{
       if(!state.xrSession || !state.modelPlaced) return;
