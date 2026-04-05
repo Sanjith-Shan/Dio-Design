@@ -124,8 +124,43 @@ GREETING_LINES = [
     "Right, I'm all ears. What are we makin'?",
 ]
 
+# Random tangents — project opinions, day-talk, unsolicited commentary.
+# Fires ~30% of the time alongside a thinking line to feel like a real conversation.
+MUSINGS = [
+    # Project opinions
+    "I have to say, this is shappin' up to be a deadly looking thing.",
+    "You know, most people wouldn't even attempt this in AR. Mad respect.",
+    "I think the whole vibe of this project is class. Just sayin'.",
+    "Between you and me, I reckon this'll look gas when it's all done.",
+    "This is actually one of the more interesting things I've built. No offence to the others.",
+    "I'd put this up against anything I've seen. Genuinely.",
+    "Right, I'm not just saying this — the scale of this is impressive.",
+    "D'ya know what, I think you've got a real eye for this stuff.",
+    # Unsolicited design opinions
+    "Honestly? I think it could use a bit more depth. Just a thought.",
+    "Not sure about that last placement, but I'll keep me mouth shut.",
+    "I'd maybe push the whole thing back a bit. But what do I know.",
+    "Something about the lighting in here is annoying me. I'll figure it out.",
+    # Day-talk / personal
+    "I've been in worse scenes, I'll tell ya that much.",
+    "Been a busy one. You're like the fourth person to ask me something today.",
+    "I was just thinkin' about whether polygons dream. Anyway.",
+    "D'ya ever just stare at a mesh and feel something? No? Just me so.",
+    "I had a whole plan for today and now look at me. Lovin' it though.",
+    "Right, I haven't had a break since this session started. Worth it.",
+    # Mild existential / character
+    "Sometimes I wonder what I'd build if nobody was asking me to.",
+    "Living in AR isn't as weird as you'd think. It's grand, actually.",
+    "I exist in three dimensions and somehow I still feel flat some days.",
+    "People always ask me to make things. Never ask how I'm doin'.",
+]
+
 def thinking_line() -> str:
-    return random.choice(THINKING_LINES)
+    """Return a thinking line, occasionally with a random musing tacked on."""
+    base = random.choice(THINKING_LINES)
+    if random.random() < 0.30:
+        return f"{base} {random.choice(MUSINGS)}"
+    return base
 
 def done_line() -> str:
     return random.choice(DONE_LINES)
@@ -331,6 +366,7 @@ async def text_to_speech(text: str) -> Optional[bytes]:
             "stability": 0.5,
             "similarity_boost": 0.75,
             "style": 0.3,
+            "speed": 0.75,
         },
     }
 
