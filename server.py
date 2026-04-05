@@ -26,7 +26,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict
 
-import aiohttp
+import httpx
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 import uvicorn
@@ -125,19 +125,14 @@ async def call_qualcomm_llm(user_message: str) -> Optional[str]:
     }
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                QUALCOMM_AI_API_URL,
-                headers=headers,
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=15),
-            ) as resp:
-                if resp.status != 200:
-                    log.error(f"Qualcomm AI error: HTTP {resp.status}")
-                    return None
-                data = await resp.json()
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                return content if content else None
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(QUALCOMM_AI_API_URL, headers=headers, json=payload)
+            if resp.status_code != 200:
+                log.error(f"Qualcomm AI error: HTTP {resp.status_code}")
+                return None
+            data = resp.json()
+            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            return content if content else None
     except Exception as e:
         log.error(f"Qualcomm AI request failed: {e}")
         return None
@@ -186,19 +181,14 @@ async def text_to_speech(text: str) -> Optional[bytes]:
     }
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                url,
-                headers=headers,
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as resp:
-                if resp.status != 200:
-                    log.error(f"ElevenLabs error: HTTP {resp.status}")
-                    return None
-                audio_data = await resp.read()
-                log.info(f"TTS audio: {len(audio_data)} bytes")
-                return audio_data
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+            if resp.status_code != 200:
+                log.error(f"ElevenLabs error: HTTP {resp.status_code}")
+                return None
+            audio_data = resp.content
+            log.info(f"TTS audio: {len(audio_data)} bytes")
+            return audio_data
     except Exception as e:
         log.error(f"ElevenLabs request failed: {e}")
         return None
