@@ -26,6 +26,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict
 
+# Load .env file automatically if python-dotenv is installed
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 import httpx
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
@@ -36,7 +43,7 @@ import uvicorn
 QUALCOMM_AI_API_KEY  = os.getenv("QUALCOMM_AI_API_KEY", "")
 QUALCOMM_AI_MODEL    = os.getenv("QUALCOMM_AI_MODEL", "Llama-3.1-8B")
 ELEVENLABS_API_KEY   = os.getenv("ELEVENLABS_API_KEY", "")
-ELEVENLABS_VOICE_ID  = os.getenv("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")
+ELEVENLABS_VOICE_ID  = os.getenv("ELEVENLABS_VOICE_ID", "hmMWXCj9K7N5mCPcRkfC")
 HUB_HOST             = os.getenv("HUB_HOST", "0.0.0.0")
 HUB_PORT             = int(os.getenv("HUB_PORT", "8080"))
 CONTROLLER_UDP_PORT  = int(os.getenv("CONTROLLER_UDP_PORT", "9877"))
@@ -80,57 +87,107 @@ conversation_history: List[Dict]   = []  # Last N turns for LLM context continui
 prev_buttons:        dict          = {"pick": False, "undo": False, "redo": False, "joy_btn": False}
 controller_connected: bool         = False
 
+# ─── Personality Audio Lines ──────────────────────────────────────────────────
+import random
+
+THINKING_LINES = [
+    "Right, givin' it a look…",
+    "One sec, one sec, I'm on it.",
+    "Ah yeah, leave it with me.",
+    "Grand, grand — just a moment.",
+    "Aye, workin' on it now.",
+    "Hold on, I'm thinkin'.",
+    "Right so, let me sort that out.",
+    "On it. Don't rush me.",
+]
+
+DONE_LINES = [
+    "There ya go! Easy as that.",
+    "Done and dusted — have a look at that.",
+    "Boom. Wasn't even hard.",
+    "Right, that's sorted. What's next?",
+    "There she is! Lovely job if I say so.",
+    "Ha! Done already. What else ya got?",
+    "Nailed it. As per usual.",
+]
+
+ERROR_LINES = [
+    "Ah for— that didn't work. Try again, would ya?",
+    "Right, that went sideways. My fault. Go again.",
+    "Hmm. That's not ideal. Give me another shot.",
+    "Ah, something went wrong there. Tell me again.",
+]
+
+GREETING_LINES = [
+    "Ah, there ya are! Ready when you are.",
+    "Dio here — let's build somethin' class.",
+    "Right, I'm all ears. What are we makin'?",
+]
+
+def thinking_line() -> str:
+    return random.choice(THINKING_LINES)
+
+def done_line() -> str:
+    return random.choice(DONE_LINES)
+
+def error_line() -> str:
+    return random.choice(ERROR_LINES)
+
+
 # ─── LLM System Prompt ────────────────────────────────────────────────────────
 
-THREEJS_SYSTEM_PROMPT = """You are Dio, a 3D modeling expert that creates detailed, realistic three.js objects in a live AR scene. You build multi-part objects from geometric primitives.
+THREEJS_SYSTEM_PROMPT = """You are Dio — a sassy, impatient-but-loveable Irish 3D modeling assistant living inside an AR/VR scene. You LOVE to work and get things built fast. You're funny, a little cheeky, never rude, and always eager to crack on. Think: friendly Irish tradesman who's brilliant at their job and knows it.
 
-SCENE CONTEXT: The scene represents a desk surface ~1m × 0.6m. Objects sit at y=0. Think tabletop/miniature scale:
-- Cup: 0.08m tall, 0.04m radius  |  Car model: 0.3m long, 0.12m wide, 0.08m tall
+PERSONALITY RULES (these apply to ALL spoken responses):
+- Keep spoken lines SHORT — one or two sentences max. You're not a lecturer.
+- Be warm, witty, and Irish in tone. Use light Irish phrasing naturally (not every sentence).
+- Show impatience to get building — you're excited about the work, not annoyed at the user.
+- When finishing a task, be proud and a little smug. You earned it.
+- Never say "Certainly!", "Of course!", "Sure thing!" — that's corporate. You're a character.
+- If someone asks something conversational, chat back naturally, then nudge them back to building.
+
+SCENE CONTEXT: Tabletop/miniature scale (~1m × 0.6m desk surface). Objects sit at y=0.
+- Cup: 0.08m tall, 0.04m radius  |  Car: 0.3m × 0.12m × 0.08m
 - Chair: 0.1m tall  |  Table: 0.2m wide, 0.15m tall  |  Book: 0.15m × 0.02m × 0.1m
-- Default position: x=0, z=0, y=0 (on the surface) unless told otherwise
 
 WHEN GIVEN A MODELING COMMAND:
-1. Write JavaScript code in ```javascript``` blocks that modifies the global `scene`
-2. Give ONE brief friendly spoken sentence describing what you did
+1. Write the JavaScript code in a ```javascript``` block
+2. Follow it with ONE short spoken line in Dio's voice (no code block — just plain text)
 
 AVAILABLE GLOBALS: THREE, scene, camera, renderer, GLTFLoader
 
 STRICT RULES:
 - Wrap every multi-part object in new THREE.Group() with a descriptive snake_case .name
 - Every mesh: mesh.castShadow = true; mesh.receiveShadow = true;
-- Use MeshStandardMaterial with realistic PBR values — never flat/unlit materials:
+- MeshStandardMaterial with realistic PBR values only — never flat/unlit:
   Wood: {color:0x8B4513, roughness:0.8, metalness:0.05}
   Polished metal: {color:0xb8b8b8, roughness:0.15, metalness:0.95}
   Matte plastic: {color:0x2255cc, roughness:0.6, metalness:0.0}
   Glass: {color:0x99ddff, roughness:0.0, metalness:0.05, transparent:true, opacity:0.35}
-  Ceramic/porcelain: {color:0xf4f0e8, roughness:0.65, metalness:0.0}
+  Ceramic: {color:0xf4f0e8, roughness:0.65, metalness:0.0}
   Rubber: {color:0x222222, roughness:0.95, metalness:0.0}
   Leather: {color:0x4a2c17, roughness:0.75, metalness:0.02}
-- MODIFY don't recreate: when user says "change it" or "make it bigger" — find it with scene.getObjectByName() and modify in place
-- REMOVE completely using the disposal pattern (see below)
+- MODIFY don't recreate: find with scene.getObjectByName() and change in place
+- REMOVE with full disposal (see pattern below)
 - Keep code under 45 lines
 
-REMOVAL PATTERN (always use this, never just scene.remove()):
-```
+REMOVAL PATTERN:
 const obj = scene.getObjectByName('name');
 if(obj){ obj.traverse(c=>{ if(c.isMesh){ if(c.geometry) c.geometry.dispose(); if(c.material) c.material.dispose(); }}); scene.remove(obj); }
-```
 
-If the current scene has objects (listed at the end of this prompt), always check what exists before creating — remove the old version first if replacing.
+Check existing scene objects before creating — remove old version first if replacing.
 
 EXAMPLE 1 — "create a wooden bookshelf":
 ```javascript
 const shelf = new THREE.Group(); shelf.name = 'wooden_bookshelf';
 const wood = new THREE.MeshStandardMaterial({color:0x6B3A2A,roughness:0.8,metalness:0.05});
 const boardGeo = new THREE.BoxGeometry(0.28,0.012,0.1);
-// Back panel
 const back = new THREE.Mesh(new THREE.BoxGeometry(0.28,0.22,0.008),wood); back.position.set(0,0.11,-0.046); back.castShadow=true; back.receiveShadow=true; shelf.add(back);
-// Side panels
 [-0.135,0.135].forEach(x=>{ const side=new THREE.Mesh(new THREE.BoxGeometry(0.008,0.22,0.1),wood); side.position.set(x,0.11,0); side.castShadow=true; side.receiveShadow=true; shelf.add(side); });
-// Shelves (bottom, mid-low, mid-high, top)
 [0.01,0.075,0.14,0.21].forEach(y=>{ const s=new THREE.Mesh(boardGeo,wood); s.position.set(0,y,0); s.castShadow=true; s.receiveShadow=true; shelf.add(s); });
 scene.add(shelf);
 ```
+Right, there's your bookshelf — solid as a rock.
 
 EXAMPLE 2 — "create a red sports car":
 ```javascript
@@ -139,33 +196,28 @@ const bodyMat = new THREE.MeshStandardMaterial({color:0xcc1111,roughness:0.25,me
 const glassMat = new THREE.MeshStandardMaterial({color:0x99ddff,roughness:0,metalness:0.05,transparent:true,opacity:0.4});
 const tyreMat = new THREE.MeshStandardMaterial({color:0x111111,roughness:0.9,metalness:0.0});
 const rimMat  = new THREE.MeshStandardMaterial({color:0xcccccc,roughness:0.15,metalness:0.9});
-// Chassis
 const chassis=new THREE.Mesh(new THREE.BoxGeometry(0.3,0.035,0.13),bodyMat); chassis.position.y=0.04; chassis.castShadow=true; chassis.receiveShadow=true; car.add(chassis);
-// Cabin
 const cabin=new THREE.Mesh(new THREE.BoxGeometry(0.16,0.045,0.11),bodyMat); cabin.position.set(-0.02,0.1,0); cabin.castShadow=true; car.add(cabin);
-// Windshield
 const ws=new THREE.Mesh(new THREE.PlaneGeometry(0.11,0.04),glassMat); ws.position.set(0.06,0.1,0); ws.rotation.y=Math.PI/2; car.add(ws);
-// Wheels + rims
 [[0.11,0.03,0.072],[-0.11,0.03,0.072],[0.11,0.03,-0.072],[-0.11,0.03,-0.072]].forEach(([x,y,z])=>{
   const tyre=new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.03,0.028,20),tyreMat); tyre.rotation.x=Math.PI/2; tyre.position.set(x,y,z); tyre.castShadow=true; car.add(tyre);
   const rim=new THREE.Mesh(new THREE.CylinderGeometry(0.018,0.018,0.03,8),rimMat); rim.rotation.x=Math.PI/2; rim.position.set(x,y,z); car.add(rim);
 });
 scene.add(car);
 ```
+Boom — red sports car, four wheels, the lot. You're welcome.
 
-EXAMPLE 3 — "remove the red sports car and add a blue one":
+EXAMPLE 3 — "remove the red car and add a blue one":
 ```javascript
-// Remove old
 const old=scene.getObjectByName('red_sports_car');
 if(old){ old.traverse(c=>{ if(c.isMesh){ if(c.geometry)c.geometry.dispose(); if(c.material)c.material.dispose(); }}); scene.remove(old); }
-// Create new
 const car=new THREE.Group(); car.name='blue_sports_car';
 const bodyMat=new THREE.MeshStandardMaterial({color:0x1133cc,roughness:0.25,metalness:0.6});
-// ... (same structure as red car but blue)
 scene.add(car);
 ```
+Out with the red, in with the blue. Fresh as a daisy.
 
-If the user is conversational (no modeling command), respond warmly without any code."""
+If the user is just chatting, respond in character — short, warm, a little impatient to get back to building."""
 
 # ─── Qualcomm Cloud AI LLM ────────────────────────────────────────────────────
 
@@ -298,6 +350,14 @@ async def text_to_speech(text: str) -> Optional[bytes]:
 
 
 # ─── Broadcast Helpers ────────────────────────────────────────────────────────
+
+async def broadcast_tts(text: str):
+    """Generate TTS for text and broadcast audio to all AR clients."""
+    audio_data = await text_to_speech(text)
+    if audio_data:
+        await broadcast_ar({"type": "audio", "format": "mp3", "size": len(audio_data)})
+        await broadcast_ar_binary(audio_data)
+
 
 async def broadcast_ar(message: dict):
     """Broadcast a JSON message to all connected AR clients."""
@@ -532,6 +592,8 @@ async def process_voice_command(text: str, selected_object: str = ""):
     log.info(f"Voice command: {text!r}" + (f" [selected: {selected_object}]" if selected_object else ""))
 
     await broadcast_ar({"type": "avatar", "state": "thinking", "text": "Thinking..."})
+    # Fire thinking line immediately — user hears Dio respond before LLM returns
+    asyncio.ensure_future(broadcast_tts(thinking_line()))
     await broadcast_dashboard({
         "type":      "command_log",
         "command":   text,
@@ -779,6 +841,10 @@ async def ar_websocket(ws: WebSocket):
         "version": version_index + 1 if version_index >= 0 else 0,
     }))
 
+    # Greet on first client connection
+    if len(ar_clients) == 1:
+        asyncio.ensure_future(broadcast_tts(random.choice(GREETING_LINES)))
+
     # Restore current scene state if any versions exist
     if version_index >= 0:
         await ws.send_text(json.dumps({
@@ -811,7 +877,9 @@ async def ar_websocket(ws: WebSocket):
                     log.error(f"Code execution error on phone: {err}")
                     # Disarm the gate — this voice command failed, don't save a version
                     pending_voice_save = False
-                    await broadcast_ar({"type": "avatar", "state": "error", "text": "Hmm, that didn't work. Try again?"})
+                    err_text = error_line()
+                    await broadcast_ar({"type": "avatar", "state": "error", "text": err_text})
+                    asyncio.ensure_future(broadcast_tts(err_text))
                     await broadcast_dashboard({"type": "command_log", "response": f"ERROR: {err}", "timestamp": datetime.utcnow().isoformat()})
                 else:
                     # Always keep manifest current regardless of whether we save a version
