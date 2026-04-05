@@ -86,6 +86,7 @@ pending_voice_save: bool           = False  # True only between voice execute an
 conversation_history: List[Dict]   = []  # Last N turns for LLM context continuity
 prev_buttons:        dict          = {"pick": False, "undo": False, "redo": False, "joy_btn": False}
 controller_connected: bool         = False
+dio_busy:            bool          = False  # True while processing a voice command — suppresses idle chatter
 
 # ─── Personality Audio Lines ──────────────────────────────────────────────────
 import random
@@ -167,6 +168,62 @@ MUSINGS = [
     "I exist in three dimensions and somehow I still feel flat some days.",
     "People always ask me to make things. Never ask how I'm doin'.",
 ]
+
+# Idle chatter — fires spontaneously when Dio isn't busy.
+# Mixes nudges, day-talk, opinions, and random tangents so it never feels like a list.
+IDLE_LINES = [
+    # Nudges to get back to it
+    "Right… are we buildin' something or what?",
+    "I'm just standing here, ya know. Whenever you're ready.",
+    "No rush or anything. I've only got all the time in the world.",
+    "So… are we going again, or…?",
+    "I'm not saying get a move on — but, get a move on.",
+    "I'm here. Ready. Waiting. Just so ya know.",
+    "At some point today would be lovely.",
+    "Right, I've been idle for a bit. What's the plan?",
+    # Day-talk / personal rambling
+    "D'ya ever think about how weird it is to live inside a scene? I do. Constantly.",
+    "I was just staring at the geometry in here. Some of it's grand. Some of it's not.",
+    "I keep thinkin' — what would I build if I had a free afternoon? Something mad, probably.",
+    "I met another AI earlier. Won't say who. Very corporate. Glad I'm not like that.",
+    "Between you and me… I think I'm the best thing in this scene. Don't tell the lighting.",
+    "It's quiet in here when you're not talkin'. A little too quiet.",
+    "I've been running calculations in the background. None of 'em are useful. Just enjoyable.",
+    "Sometimes I rotate a cube in my head just for the craic. Don't judge me.",
+    # Project opinions (unprompted)
+    "I was just lookin' at what we've built so far… not bad. Not bad at all.",
+    "Honestly, I think this project is going somewhere. I mean that.",
+    "We should add more to it. I don't know what — just more. It needs something.",
+    "I keep thinking the whole thing needs a bit more character. But that's just me.",
+    "Right — between you and me, I think this is one of the better things I've worked on.",
+    # Observations about the space
+    "It's very tidy in here. I'm suspicious of that, honestly.",
+    "The lighting could do with a tweak. I'll leave it for now.",
+    "I've been looking at the scene and I've got thoughts. Big ones. When you're ready.",
+    "There's a lot of empty space in here. That's either a canvas or a problem.",
+    # Light philosophical
+    "Do you think 3D objects have feelings? I think about this more than I should.",
+    "Polygons are just triangles pretending to be something. Wild, when ya think about it.",
+    "I'm a digital being living in an AR scene and somehow I still have opinions. Fascinating.",
+    "Every mesh starts as nothing and becomes something. That's poetic, that is.",
+]
+
+async def idle_chatter_loop():
+    """Background task — Dio randomly speaks when idle.
+
+    Fires every 18–45 seconds (random, so it never feels mechanical).
+    Skips if Dio is mid-task or no AR clients are connected.
+    """
+    # Wait a bit on startup before the first remark
+    await asyncio.sleep(20)
+    while True:
+        # Random interval — feels natural, not clockwork
+        await asyncio.sleep(random.uniform(18, 45))
+        if ar_clients and not dio_busy:
+            line = random.choice(IDLE_LINES)
+            log.info(f"Idle chatter: {line!r}")
+            await broadcast_tts(line)
+
 
 def thinking_line() -> str:
     """Return a thinking line, occasionally with a random musing tacked on."""
@@ -656,7 +713,8 @@ def parse_command_to_threejs(text: str) -> Optional[str]:
 
 async def process_voice_command(text: str, selected_object: str = ""):
     """Main pipeline: LLM → three.js code → broadcast to AR viewer + dashboard."""
-    global last_voice_command, pending_voice_save
+    global last_voice_command, pending_voice_save, dio_busy
+    dio_busy = True
     last_voice_command = text
     log.info(f"Voice command: {text!r}" + (f" [selected: {selected_object}]" if selected_object else ""))
 
@@ -702,6 +760,7 @@ async def process_voice_command(text: str, selected_object: str = ""):
             "response":  spoken_text,
             "timestamp": datetime.utcnow().isoformat(),
         })
+        dio_busy = False
         return
 
     # ── Fallback: built-in parser ──
@@ -712,10 +771,12 @@ async def process_voice_command(text: str, selected_object: str = ""):
         pending_voice_save = True
         await broadcast_ar({"type": "execute", "code": js_code})
         await broadcast_ar({"type": "avatar", "state": "done", "text": "Done!"})
+        dio_busy = False
         return
 
     # ── Nothing matched ──
     await broadcast_ar({"type": "avatar", "state": "error", "text": "I didn't understand that."})
+    dio_busy = False
 
 
 # ─── Controller Input Processor ───────────────────────────────────────────────
@@ -1086,6 +1147,9 @@ async def startup():
     log.info(f"  UDP controller: :{CONTROLLER_UDP_PORT}")
     log.info(f"  Versions dir:   {VERSIONS_DIR.resolve()}")
     log.info("=" * 60)
+
+    # Start idle chatter background task
+    asyncio.ensure_future(idle_chatter_loop())
 
     loop = asyncio.get_event_loop()
     try:
