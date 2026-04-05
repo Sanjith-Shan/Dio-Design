@@ -726,7 +726,12 @@ async function initXR(){
     state.localRef = await sess.requestReferenceSpace('local');
     state.hitTestSource = await sess.requestHitTestSource({space:vs});
 
-    sess.addEventListener('select',()=>{
+    sess.addEventListener('select',(e)=>{
+      // Ignore selects that originated from a DOM overlay element (mic btn, status bar, etc.)
+      if(e.inputSource?.targetRayMode === 'screen' && document.elementFromPoint(
+          e.inputSource.gamepad?.axes[0] ?? 0,
+          e.inputSource.gamepad?.axes[1] ?? 0
+        )?.closest('#ar-overlay *:not(canvas)')) return;
       if(!state.modelPlaced && ret.visible){
         anc.matrix.copy(ret.matrix); anc.matrixAutoUpdate=false; anc.visible=true;
         state.modelPlaced=true;
@@ -737,7 +742,7 @@ async function initXR(){
         if(anc2) send({type:'place_model',position:[anc2.position.x,anc2.position.y,anc2.position.z]});
       }
     });
-    sess.addEventListener('end',()=>{ state.xrSession=null; dom.landing.style.display='flex'; dom.overlay.classList.remove('active'); });
+    sess.addEventListener('end',()=>{ state.xrSession=null; dom.landing.style.display='flex'; dom.overlay.classList.remove('active'); dom.startBtn.disabled=false; dom.startBtn.textContent='Enter AR'; });
 
     let prev=0;
     ren.setAnimationLoop((time,frame)=>{
@@ -764,6 +769,27 @@ async function initXR(){
     });
 
     connectWS();
+
+    // Auto-start voice recognition immediately on XR session start.
+    // No tap needed — Dio is always listening inside AR.
+    initVoice();
+    if(state.recognition){
+      state.listening = true;
+      state.recognition.start();
+      state.voiceAn.start();
+      dom.micBtn.classList.add('listening');
+      state.avatar?.setListening();
+    }
+
+    sess.addEventListener('end',()=>{
+      // Stop recognition cleanly when XR ends
+      if(state.recognition && state.listening){
+        state.listening = false;
+        state.recognition.stop();
+        state.voiceAn.stop();
+        dom.micBtn.classList.remove('listening');
+      }
+    });
 
     document.addEventListener('touchstart',()=>{
       if(!state.xrSession || !state.modelPlaced) return;
