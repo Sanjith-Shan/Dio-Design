@@ -520,11 +520,12 @@ function handleMsg(m){
   if(m.type==='execute' && m.code && state.scene){
     try {
       new Function('THREE','scene','camera','renderer','GLTFLoader', m.code)(THREE, state.scene, state.camera, state.renderer, GLTFLoader);
-      // Serialize and send scene state back to hub
       const sceneData = serializeScene();
       send({ type: 'scene_state', data: sceneData });
     } catch(e) {
-      console.error('Code execution error:', e);
+      console.log('SPEECH: code execution error: ' + e.message);
+      state.avatar?.setError();
+      showBubble("Hmm, that didn't work. Try again?", 3000);
       send({ type: 'scene_state', error: e.message });
     }
   }
@@ -727,12 +728,34 @@ async function initXR(){
 
   const scene = new THREE.Scene();
   const cam = new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.01,20);
-  scene.add(new THREE.AmbientLight(0xffffff,0.7));
-  const sun=new THREE.DirectionalLight(0xffffff,0.8); sun.position.set(5,10,7.5);
-  sun.castShadow = true;
-  sun.shadow.mapSize.width = 1024;
-  sun.shadow.mapSize.height = 1024;
-  scene.add(sun);
+  // Ambient — soft base fill
+  scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+  // Warm key light from upper-left (main shadow caster)
+  const keyLight = new THREE.DirectionalLight(0xfff0dd, 1.0);
+  keyLight.position.set(-3, 8, 5);
+  keyLight.castShadow = true;
+  keyLight.shadow.mapSize.width = 1024;
+  keyLight.shadow.mapSize.height = 1024;
+  keyLight.shadow.camera.near = 0.1;
+  keyLight.shadow.camera.far = 20;
+  scene.add(keyLight);
+  // Cool fill light from lower-right
+  const fillLight = new THREE.DirectionalLight(0xddeeff, 0.3);
+  fillLight.position.set(4, 2, -3);
+  scene.add(fillLight);
+  // Hemisphere — sky/ground color bleed
+  const hemi = new THREE.HemisphereLight(0xaaccff, 0x664422, 0.3);
+  scene.add(hemi);
+
+  // Shadow-catcher ground plane — semi-transparent, receives shadows only
+  const floorGeo = new THREE.PlaneGeometry(2, 2);
+  const floorMat = new THREE.ShadowMaterial({ opacity: 0.25 });
+  const floor = new THREE.Mesh(floorGeo, floorMat);
+  floor.name = 'ground_plane';
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = 0;
+  floor.receiveShadow = true;
+  scene.add(floor);
 
   const ret = new THREE.Mesh(
     new THREE.RingGeometry(0.05,0.06,32).rotateX(-Math.PI/2),
@@ -751,11 +774,32 @@ async function initXR(){
   initVoice();
 
   try{
-    const sess = await navigator.xr.requestSession('immersive-ar',{
-      requiredFeatures:['hit-test','local'],
-      optionalFeatures:['dom-overlay'],
-      domOverlay:{root:dom.overlay},
-    });
+    // Try immersive-ar first; fall back to immersive-vr with video passthrough
+    let sess, sessionMode = 'immersive-ar';
+    const arSupported = await navigator.xr.isSessionSupported('immersive-ar').catch(()=>false);
+    if(arSupported){
+      sess = await navigator.xr.requestSession('immersive-ar',{
+        requiredFeatures:['hit-test','local'],
+        optionalFeatures:['dom-overlay'],
+        domOverlay:{root:dom.overlay},
+      });
+    } else {
+      sessionMode = 'immersive-vr';
+      sess = await navigator.xr.requestSession('immersive-vr',{
+        requiredFeatures:['local'],
+        optionalFeatures:['dom-overlay'],
+        domOverlay:{root:dom.overlay},
+      });
+      // Video passthrough background for VR mode
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+        const video = document.createElement('video');
+        video.srcObject = stream; video.autoplay = true; video.playsInline = true;
+        await new Promise(r => video.onloadedmetadata = r);
+        video.play();
+        scene.background = new THREE.VideoTexture(video);
+      } catch(ve){ console.warn('Video passthrough unavailable:', ve.message); }
+    }
     ren.xr.setReferenceSpaceType('local');
     await ren.xr.setSession(sess);
     state.xrSession = sess;
@@ -763,7 +807,9 @@ async function initXR(){
 
     const vs = await sess.requestReferenceSpace('viewer');
     state.localRef = await sess.requestReferenceSpace('local');
-    state.hitTestSource = await sess.requestHitTestSource({space:vs});
+    if(sessionMode === 'immersive-ar'){
+        state.hitTestSource = await sess.requestHitTestSource({space:vs});
+      }
 
     sess.addEventListener('select',(e)=>{
       // Ignore selects that originated from a DOM overlay element (mic btn, status bar, etc.)

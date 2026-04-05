@@ -4,28 +4,26 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Dio Design — Dashboard</title>
+<script type="importmap">{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.162.0/build/three.module.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.162.0/examples/jsm/"
+}}</script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
-    --bg: #0a0a0f;
-    --bg-panel: #0d1018;
-    --bg-card: #0f1520;
-    --bg-card-hover: #141e2e;
+    --bg: #080c12;
+    --bg-panel: #060a0f;
+    --bg-left: #0a0f18;
+    --bg-card: #0d1520;
+    --bg-card-hover: #121c2a;
+    --bg-card-sel: #111d2e;
     --border: #1a2535;
     --accent: #88ccff;
     --text: #c8d8e8;
     --text-dim: #6a7f96;
     --green: #44ff88;
     --red: #ff4455;
-    --badge-voice: #2a4a7f;
-    --badge-voice-text: #88ccff;
-    --badge-response: #1a3a2a;
-    --badge-response-text: #44ff88;
-    --badge-connect: #2a3a1a;
-    --badge-connect-text: #aadd66;
-    --badge-error: #3a1a1a;
-    --badge-error-text: #ff6677;
   }
 
   html, body {
@@ -37,18 +35,17 @@
     overflow: hidden;
   }
 
-  /* Scrollbars */
-  ::-webkit-scrollbar { width: 5px; height: 5px; }
-  ::-webkit-scrollbar-track { background: var(--bg); }
-  ::-webkit-scrollbar-thumb { background: #1e3050; border-radius: 3px; }
-  ::-webkit-scrollbar-thumb:hover { background: #2a4070; }
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: #0a0f18; }
+  ::-webkit-scrollbar-thumb { background: #1e3048; border-radius: 2px; }
+  ::-webkit-scrollbar-thumb:hover { background: #2a4060; }
 
   /* Top bar */
   #topbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 1.5rem;
+    padding: 0 1.2rem;
     height: 48px;
     background: var(--bg-panel);
     border-bottom: 1px solid var(--border);
@@ -56,9 +53,9 @@
   }
 
   #topbar-title {
-    font-size: 0.85rem;
+    font-size: 0.82rem;
     font-weight: 600;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.14em;
     text-transform: uppercase;
     color: var(--accent);
   }
@@ -66,17 +63,18 @@
   #status-row {
     display: flex;
     align-items: center;
-    gap: 1.2rem;
+    gap: 1.1rem;
   }
 
   .status-item {
     display: flex;
     align-items: center;
-    gap: 0.45rem;
-    font-size: 0.72rem;
-    letter-spacing: 0.08em;
+    gap: 0.4rem;
+    font-size: 0.7rem;
+    letter-spacing: 0.09em;
     text-transform: uppercase;
     color: var(--text-dim);
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
   }
 
   .status-dot {
@@ -99,10 +97,11 @@
 
   /* Left panel */
   #left-panel {
-    width: 35%;
-    min-width: 280px;
+    width: 30%;
+    min-width: 260px;
     display: flex;
     flex-direction: column;
+    background: var(--bg-left);
     border-right: 1px solid var(--border);
     overflow: hidden;
   }
@@ -120,15 +119,15 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0.85rem 1rem;
+    padding: 0.75rem 1rem;
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
     gap: 0.5rem;
   }
 
   .panel-title {
-    font-size: 0.75rem;
-    letter-spacing: 0.15em;
+    font-size: 0.72rem;
+    letter-spacing: 0.16em;
     text-transform: uppercase;
     color: var(--accent);
     font-weight: 600;
@@ -143,13 +142,13 @@
 
   /* Buttons */
   .btn {
-    border: 1px solid rgba(136, 204, 255, 0.3);
-    background: rgba(136, 204, 255, 0.08);
+    border: 1px solid rgba(136,204,255,0.3);
+    background: rgba(136,204,255,0.08);
     color: var(--accent);
     border-radius: 4px;
-    padding: 0.3rem 0.8rem;
-    font-size: 0.7rem;
-    letter-spacing: 0.06em;
+    padding: 0.3rem 0.9rem;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
     cursor: pointer;
     transition: background 0.15s, border-color 0.15s;
     white-space: nowrap;
@@ -157,72 +156,99 @@
   }
 
   .btn:hover {
-    background: rgba(136, 204, 255, 0.16);
-    border-color: rgba(136, 204, 255, 0.55);
+    background: rgba(136,204,255,0.15);
+    border-color: rgba(136,204,255,0.55);
   }
 
-  .btn:active { opacity: 0.8; }
+  .btn:active { opacity: 0.75; }
 
-  /* Hidden file input */
   #load-session-input { display: none; }
 
-  /* Scrollable areas */
-  .scroll-area {
+  /* Version list */
+  #version-list {
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
-    padding: 0.75rem;
+    padding: 0.7rem;
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
   }
 
-  /* Version entries */
   .version-entry {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: 6px;
-    padding: 0.75rem;
+    padding: 0.7rem;
     cursor: pointer;
     transition: background 0.15s, border-color 0.15s;
     font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-    font-size: 0.8rem;
+    font-size: 0.78rem;
   }
 
   .version-entry:hover { background: var(--bg-card-hover); }
-  .version-entry.selected { border-color: var(--accent); }
+
+  .version-entry.selected {
+    border-color: var(--accent);
+    background: var(--bg-card-sel);
+  }
 
   .version-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    margin-bottom: 0.35rem;
     gap: 0.5rem;
+    margin-bottom: 0.35rem;
   }
 
   .version-num {
     color: var(--accent);
     font-weight: 700;
-    font-size: 0.82rem;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+  }
+
+  .version-thumb {
+    width: 48px;
+    height: 36px;
+    border-radius: 3px;
+    object-fit: cover;
+    border: 1px solid var(--border);
+    background: #0a0f1a;
+    flex-shrink: 0;
+  }
+
+  .version-thumb-placeholder {
+    width: 48px;
+    height: 36px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: #0a0f1a;
+    flex-shrink: 0;
+  }
+
+  .version-meta {
+    flex: 1;
+    min-width: 0;
   }
 
   .version-ts {
     color: var(--text-dim);
-    font-size: 0.7rem;
+    font-size: 0.68rem;
     white-space: nowrap;
   }
 
   .version-cmd {
     color: var(--text);
-    font-size: 0.76rem;
+    font-size: 0.75rem;
     line-height: 1.4;
     word-break: break-word;
-    margin-bottom: 0.5rem;
+    margin-top: 0.2rem;
   }
 
   .version-footer {
     display: flex;
     justify-content: flex-end;
+    margin-top: 0.45rem;
   }
 
   .btn-export {
@@ -233,50 +259,104 @@
   /* Empty state */
   .empty-state {
     color: var(--text-dim);
-    font-size: 0.78rem;
+    font-size: 0.76rem;
     text-align: center;
     padding: 2rem 1rem;
     font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    line-height: 1.6;
   }
 
-  /* Live feed entries */
+  /* Right panel split */
+  #preview-section {
+    flex: 0 0 65%;
+    position: relative;
+    border-bottom: 1px solid var(--border);
+    overflow: hidden;
+    background: #0a0f1a;
+  }
+
+  #preview-header {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 1rem;
+    background: rgba(6,10,15,0.7);
+    border-bottom: 1px solid var(--border);
+    z-index: 10;
+    pointer-events: none;
+  }
+
+  #preview-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  #feed-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  #feed-list {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 0.65rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+
+  /* Feed entries */
   .feed-entry {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: 6px;
-    padding: 0.6rem 0.75rem;
+    padding: 0.5rem 0.75rem;
     display: flex;
     align-items: flex-start;
-    gap: 0.6rem;
-    font-size: 0.8rem;
+    gap: 0.55rem;
+    font-size: 0.78rem;
     line-height: 1.45;
+    flex-shrink: 0;
   }
+
+  .feed-entry.type-VOICE    { border-left: 3px solid #88ccff; }
+  .feed-entry.type-RESPONSE { border-left: 3px solid #44ff88; }
+  .feed-entry.type-ERROR    { border-left: 3px solid #ff4455; }
+  .feed-entry.type-INFO     { border-left: 3px solid #888; }
+  .feed-entry.type-CONNECT  { border-left: 3px solid #aaddff; }
 
   .feed-ts {
     color: var(--text-dim);
     font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-    font-size: 0.68rem;
+    font-size: 0.66rem;
     white-space: nowrap;
-    padding-top: 0.05rem;
+    padding-top: 0.07rem;
     flex-shrink: 0;
   }
 
   .feed-badge {
-    font-size: 0.6rem;
+    font-size: 0.58rem;
     font-weight: 700;
     letter-spacing: 0.1em;
-    padding: 0.15rem 0.45rem;
+    padding: 0.15rem 0.4rem;
     border-radius: 3px;
     white-space: nowrap;
     flex-shrink: 0;
     margin-top: 0.05rem;
   }
 
-  .badge-VOICE    { background: var(--badge-voice);    color: var(--badge-voice-text); }
-  .badge-RESPONSE { background: var(--badge-response); color: var(--badge-response-text); }
-  .badge-CONNECT  { background: var(--badge-connect);  color: var(--badge-connect-text); }
-  .badge-ERROR    { background: var(--badge-error);    color: var(--badge-error-text); }
-  .badge-INFO     { background: #1e2535; color: #8899aa; }
+  .badge-VOICE    { background: rgba(136,204,255,0.15); color: #88ccff; }
+  .badge-RESPONSE { background: rgba(68,255,136,0.1);  color: #44ff88; }
+  .badge-ERROR    { background: rgba(255,68,85,0.1);   color: #ff6677; }
+  .badge-INFO     { background: transparent;           color: #8899aa; }
+  .badge-CONNECT  { background: rgba(170,221,255,0.1); color: #aaddff; }
 
   .feed-msg {
     color: var(--text);
@@ -292,11 +372,11 @@
   <div id="status-row">
     <div class="status-item">
       <div class="status-dot" id="dot-ar"></div>
-      <span>AR Viewer</span>
+      <span>AR</span>
     </div>
     <div class="status-item">
-      <div class="status-dot" id="dot-controller"></div>
-      <span>Controller</span>
+      <div class="status-dot" id="dot-ctrl"></div>
+      <span>CTRL</span>
     </div>
   </div>
 </div>
@@ -306,250 +386,417 @@
   <!-- Left Panel: Version Timeline -->
   <div id="left-panel">
     <div class="panel-header">
-      <span class="panel-title">Scene Versions</span>
+      <span class="panel-title">Versions</span>
       <div class="header-actions">
-        <button class="btn" id="btn-save">Save Session</button>
-        <button class="btn" id="btn-load-trigger">Load Session</button>
+        <button class="btn" id="btn-save">Save</button>
+        <button class="btn" id="btn-load-trigger">Load</button>
         <input type="file" id="load-session-input" accept=".json">
       </div>
     </div>
-    <div class="scroll-area" id="version-list">
+    <div id="version-list">
       <div class="empty-state">No versions yet.<br>Speak a command to begin.</div>
     </div>
   </div>
 
-  <!-- Right Panel: Live Activity Feed -->
+  <!-- Right Panel -->
   <div id="right-panel">
-    <div class="panel-header">
-      <span class="panel-title">Live Activity</span>
-    </div>
-    <div class="scroll-area" id="feed-list">
-      <div class="empty-state">Waiting for activity...</div>
-    </div>
-  </div>
 
+    <!-- 3D Preview (top 65%) -->
+    <div id="preview-section">
+      <div id="preview-header">
+        <span class="panel-title" style="pointer-events:auto;">3D Preview</span>
+      </div>
+      <canvas id="preview-canvas"></canvas>
+    </div>
+
+    <!-- Live Feed (bottom 35%) -->
+    <div id="feed-section">
+      <div class="panel-header">
+        <span class="panel-title">Live Feed</span>
+      </div>
+      <div id="feed-list">
+        <div class="empty-state">Waiting for activity...</div>
+      </div>
+    </div>
+
+  </div>
 </div>
 
-<script>
-(function () {
-  'use strict';
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 
-  // ── State ────────────────────────────────────────────────────────────────
-  let ws = null;
-  let selectedVersionId = null;
-  let reconnectTimer = null;
-  const MAX_FEED_ENTRIES = 200;
+// ── State ────────────────────────────────────────────────────────────────────
+let ws = null;
+let selectedVersionId = null;
+let reconnectTimer = null;
+let versionsCache = [];
+const thumbnails = new Map();
+const MAX_FEED = 50;
 
-  // ── DOM refs ─────────────────────────────────────────────────────────────
-  const dotAR         = document.getElementById('dot-ar');
-  const dotCtrl       = document.getElementById('dot-controller');
-  const versionList   = document.getElementById('version-list');
-  const feedList      = document.getElementById('feed-list');
-  const btnSave       = document.getElementById('btn-save');
-  const btnLoadTrigger= document.getElementById('btn-load-trigger');
-  const fileInput     = document.getElementById('load-session-input');
+// ── DOM refs ─────────────────────────────────────────────────────────────────
+const dotAR          = document.getElementById('dot-ar');
+const dotCtrl        = document.getElementById('dot-ctrl');
+const versionList    = document.getElementById('version-list');
+const feedList       = document.getElementById('feed-list');
+const btnSave        = document.getElementById('btn-save');
+const btnLoadTrigger = document.getElementById('btn-load-trigger');
+const fileInput      = document.getElementById('load-session-input');
+const previewCanvas  = document.getElementById('preview-canvas');
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-  function formatTime(ts) {
-    const d = ts ? new Date(ts) : new Date();
-    const pad = n => String(n).padStart(2, '0');
-    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-  }
+// ── Three.js Scene ────────────────────────────────────────────────────────────
+const previewRenderer = new THREE.WebGLRenderer({ antialias: true, canvas: previewCanvas, preserveDrawingBuffer: true });
+previewRenderer.setPixelRatio(devicePixelRatio);
+previewRenderer.shadowMap.enabled = true;
 
-  function truncate(str, max) {
-    if (!str) return '';
-    return str.length > max ? str.slice(0, max) + '…' : str;
-  }
+const previewScene = new THREE.Scene();
+previewScene.background = new THREE.Color(0x0a0f1a);
 
-  function send(obj) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(obj));
+const previewCam = new THREE.PerspectiveCamera(50, 1, 0.01, 50);
+previewCam.position.set(0.4, 0.35, 0.5);
+
+const controls = new OrbitControls(previewCam, previewCanvas);
+controls.enableDamping = true;
+controls.dampingFactor = 0.05;
+controls.target.set(0, 0.05, 0);
+
+// Grid
+const grid = new THREE.GridHelper(1, 20, 0x1a2535, 0x1a2535);
+previewScene.add(grid);
+
+// Lighting
+previewScene.add(new THREE.AmbientLight(0xffffff, 0.5));
+const dirLight = new THREE.DirectionalLight(0xfff0dd, 1.0);
+dirLight.position.set(-2, 4, 3);
+dirLight.castShadow = true;
+previewScene.add(dirLight);
+previewScene.add(new THREE.HemisphereLight(0xaaccff, 0x664422, 0.3));
+
+// Animate loop
+function animatePreview() {
+  requestAnimationFrame(animatePreview);
+  controls.update();
+  previewRenderer.render(previewScene, previewCam);
+}
+animatePreview();
+
+// Resize observer
+new ResizeObserver(() => {
+  const { width, height } = previewCanvas.getBoundingClientRect();
+  if (width === 0 || height === 0) return;
+  previewRenderer.setSize(width, height, false);
+  previewCam.aspect = width / height;
+  previewCam.updateProjectionMatrix();
+}).observe(previewCanvas);
+
+// ── Scene Reconstruction ──────────────────────────────────────────────────────
+
+function clearPreviewMeshes() {
+  const toRemove = [];
+  previewScene.traverse(obj => {
+    if (obj.isMesh) toRemove.push(obj);
+  });
+  toRemove.forEach(m => {
+    if (m.geometry) m.geometry.dispose();
+    if (m.material) {
+      if (Array.isArray(m.material)) m.material.forEach(mat => mat.dispose());
+      else m.material.dispose();
     }
+    previewScene.remove(m);
+  });
+}
+
+function buildGeometry(od) {
+  const type = od.geometry || 'box';
+  const p    = od.geometryParams || {};
+  switch (type.toLowerCase()) {
+    case 'sphere':
+      return new THREE.SphereGeometry(p.radius ?? 0.1, p.widthSegments ?? 32, p.heightSegments ?? 16);
+    case 'cylinder':
+      return new THREE.CylinderGeometry(p.radiusTop ?? 0.05, p.radiusBottom ?? 0.05, p.height ?? 0.2, p.radialSegments ?? 32);
+    case 'cone':
+      return new THREE.ConeGeometry(p.radius ?? 0.1, p.height ?? 0.2, p.radialSegments ?? 32);
+    case 'torus':
+      return new THREE.TorusGeometry(p.radius ?? 0.1, p.tube ?? 0.03, p.radialSegments ?? 16, p.tubularSegments ?? 100);
+    case 'box':
+    default:
+      return new THREE.BoxGeometry(p.width ?? 0.2, p.height ?? 0.2, p.depth ?? 0.2);
+  }
+}
+
+function buildMaterial(od) {
+  const m = od.material || {};
+  return new THREE.MeshStandardMaterial({
+    color:     m.color     !== undefined ? m.color     : 0xaaaaaa,
+    roughness: m.roughness !== undefined ? m.roughness : 0.5,
+    metalness: m.metalness !== undefined ? m.metalness : 0.0,
+    opacity:   m.opacity   !== undefined ? m.opacity   : 1.0,
+    transparent: (m.opacity !== undefined && m.opacity < 1.0),
+    wireframe: !!m.wireframe,
+  });
+}
+
+function loadVersionIntoPreview(versionData) {
+  clearPreviewMeshes();
+
+  const objects = (versionData && versionData.objects) ? versionData.objects : [];
+  objects.forEach(od => {
+    const geo  = buildGeometry(od);
+    const mat  = buildMaterial(od);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow    = true;
+    mesh.receiveShadow = true;
+
+    if (od.position) mesh.position.set(od.position.x ?? 0, od.position.y ?? 0, od.position.z ?? 0);
+    if (od.rotation) mesh.rotation.set(od.rotation.x ?? 0, od.rotation.y ?? 0, od.rotation.z ?? 0);
+    if (od.scale)    mesh.scale.set(od.scale.x ?? 1, od.scale.y ?? 1, od.scale.z ?? 1);
+
+    previewScene.add(mesh);
+  });
+}
+
+function captureVersionThumbnail(versionId) {
+  // Force one render, then grab JPEG
+  controls.update();
+  previewRenderer.render(previewScene, previewCam);
+  const dataUrl = previewRenderer.domElement.toDataURL('image/jpeg', 0.7);
+  thumbnails.set(versionId, dataUrl);
+  // Re-render the version list to show the thumbnail
+  buildVersionList(versionsCache);
+}
+
+// ── GLB Export ────────────────────────────────────────────────────────────────
+function exportVersionAsGLB(versionData) {
+  loadVersionIntoPreview(versionData);
+  const exporter = new GLTFExporter();
+  exporter.parse(
+    previewScene,
+    (result) => {
+      const blob = new Blob([result], { type: 'model/gltf-binary' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = 'dio_scene.glb';
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+    (err) => console.error('GLTFExporter error:', err),
+    { binary: true }
+  );
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function formatTime(ts) {
+  const d = ts ? new Date(ts) : new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function truncate(str, max) {
+  if (!str) return '';
+  return str.length > max ? str.slice(0, max) + '\u2026' : str;
+}
+
+function send(obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(obj));
+  }
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function escapeAttr(str) {
+  return String(str).replace(/"/g, '&quot;');
+}
+
+function setDot(dot, connected) {
+  if (connected) dot.classList.add('connected');
+  else           dot.classList.remove('connected');
+}
+
+// ── Version Timeline ──────────────────────────────────────────────────────────
+function buildVersionList(versions) {
+  versionsCache = versions || [];
+
+  if (!versionsCache.length) {
+    versionList.innerHTML = '<div class="empty-state">No versions yet.<br>Speak a command to begin.</div>';
+    return;
   }
 
-  // ── Connection status dots ────────────────────────────────────────────────
-  function setDot(dot, connected) {
-    if (connected) {
-      dot.classList.add('connected');
-    } else {
-      dot.classList.remove('connected');
-    }
-  }
+  const sorted = [...versionsCache].reverse();
+  versionList.innerHTML = '';
 
-  // ── Version timeline ──────────────────────────────────────────────────────
-  function buildVersionList(versions) {
-    if (!versions || versions.length === 0) {
-      versionList.innerHTML = '<div class="empty-state">No versions yet.<br>Speak a command to begin.</div>';
-      return;
-    }
-
-    // Newest first
-    const sorted = [...versions].reverse();
-
-    versionList.innerHTML = '';
-    sorted.forEach(v => {
-      const entry = document.createElement('div');
-      entry.className = 'version-entry' + (v.id === selectedVersionId ? ' selected' : '');
-      entry.dataset.versionId = v.id;
-
-      const ts = formatTime(v.timestamp);
-      const cmd = truncate(v.command || '(no command)', 60);
-
-      entry.innerHTML = `
-        <div class="version-header">
-          <span class="version-num">v${v.version}</span>
-          <span class="version-ts">${ts}</span>
-        </div>
-        <div class="version-cmd">${escapeHtml(cmd)}</div>
-        <div class="version-footer">
-          <button class="btn btn-export" data-version-id="${escapeAttr(v.id)}">Export GLB</button>
-        </div>
-      `;
-
-      // Click to load version (on the card, not the button)
-      entry.addEventListener('click', function (e) {
-        if (e.target.closest('.btn-export')) return;
-        selectedVersionId = v.id;
-        document.querySelectorAll('.version-entry').forEach(el => el.classList.remove('selected'));
-        entry.classList.add('selected');
-        send({ type: 'load_version', version_id: v.id });
-      });
-
-      // Export button
-      entry.querySelector('.btn-export').addEventListener('click', function (e) {
-        e.stopPropagation();
-        send({ type: 'trigger_export', version_id: v.id });
-        addFeedEntry('INFO', `Export triggered for v${v.version}`);
-      });
-
-      versionList.appendChild(entry);
-    });
-  }
-
-  // ── Live feed ─────────────────────────────────────────────────────────────
-  function addFeedEntry(type, message, ts) {
-    // Remove empty state if present
-    const empty = feedList.querySelector('.empty-state');
-    if (empty) empty.remove();
-
+  sorted.forEach(v => {
     const entry = document.createElement('div');
-    entry.className = 'feed-entry';
+    entry.className = 'version-entry' + (v.id === selectedVersionId ? ' selected' : '');
+    entry.dataset.versionId = v.id;
+
+    const ts  = formatTime(v.timestamp);
+    const cmd = truncate(v.command || '(no command)', 55);
+    const thumbSrc = thumbnails.get(v.id);
+    const thumbHtml = thumbSrc
+      ? `<img class="version-thumb" src="${escapeAttr(thumbSrc)}" alt="preview">`
+      : `<div class="version-thumb-placeholder"></div>`;
+
     entry.innerHTML = `
-      <span class="feed-ts">${formatTime(ts)}</span>
-      <span class="feed-badge badge-${type}">${escapeHtml(type)}</span>
-      <span class="feed-msg">${escapeHtml(message)}</span>
+      <div class="version-header">
+        <span class="version-num">v${v.version}</span>
+        ${thumbHtml}
+        <div class="version-meta">
+          <div class="version-ts">${ts}</div>
+          <div class="version-cmd">${escapeHtml(cmd)}</div>
+        </div>
+      </div>
+      <div class="version-footer">
+        <button class="btn btn-export" data-vid="${escapeAttr(String(v.id))}">Export GLB</button>
+      </div>
     `;
 
-    // Newest on top
-    feedList.insertBefore(entry, feedList.firstChild);
-
-    // Trim old entries
-    const entries = feedList.querySelectorAll('.feed-entry');
-    if (entries.length > MAX_FEED_ENTRIES) {
-      entries[entries.length - 1].remove();
-    }
-  }
-
-  // ── HTML escaping ─────────────────────────────────────────────────────────
-  function escapeHtml(str) {
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
-
-  function escapeAttr(str) {
-    return String(str).replace(/"/g, '&quot;');
-  }
-
-  // ── WebSocket ─────────────────────────────────────────────────────────────
-  function connect() {
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${proto}//${location.host}/ws/dashboard`;
-
-    ws = new WebSocket(url);
-
-    ws.addEventListener('open', function () {
-      addFeedEntry('CONNECT', 'Connected to hub');
-      send({ type: 'request_state' });
-      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-    });
-
-    ws.addEventListener('close', function () {
-      addFeedEntry('ERROR', 'Disconnected from hub — reconnecting…');
-      ws = null;
-      reconnectTimer = setTimeout(connect, 3000);
-    });
-
-    ws.addEventListener('error', function () {
-      // close event will follow; avoid duplicate messages
-    });
-
-    ws.addEventListener('message', function (evt) {
-      let msg;
-      try { msg = JSON.parse(evt.data); } catch { return; }
-      handleMessage(msg);
-    });
-  }
-
-  function handleMessage(msg) {
-    switch (msg.type) {
-
-      case 'versions':
-        buildVersionList(msg.data || []);
-        break;
-
-      case 'command_log': {
-        const ts = msg.timestamp;
-        if (msg.command) addFeedEntry('VOICE', msg.command, ts);
-        if (msg.response) addFeedEntry('RESPONSE', msg.response, ts);
-        break;
+    entry.addEventListener('click', function (e) {
+      if (e.target.closest('.btn-export')) return;
+      selectedVersionId = v.id;
+      document.querySelectorAll('.version-entry').forEach(el => el.classList.remove('selected'));
+      entry.classList.add('selected');
+      if (v.scene_data) {
+        loadVersionIntoPreview(v.scene_data);
+        captureVersionThumbnail(v.id);
       }
+    });
 
-      case 'connection_status':
-        setDot(dotAR,   !!msg.ar_connected);
-        setDot(dotCtrl, !!msg.controller_connected);
-        break;
+    entry.querySelector('.btn-export').addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (v.scene_data) exportVersionAsGLB(v.scene_data);
+      else addFeedEntry('ERROR', `v${v.version} has no scene data to export`);
+    });
 
-      default:
-        // Ignore unknown message types silently
-        break;
-    }
+    versionList.appendChild(entry);
+  });
+}
+
+// ── Live Feed ─────────────────────────────────────────────────────────────────
+function addFeedEntry(type, message, ts) {
+  const empty = feedList.querySelector('.empty-state');
+  if (empty) empty.remove();
+
+  const entry = document.createElement('div');
+  entry.className = `feed-entry type-${type}`;
+  entry.innerHTML = `
+    <span class="feed-ts">${formatTime(ts)}</span>
+    <span class="feed-badge badge-${type}">${escapeHtml(type)}</span>
+    <span class="feed-msg">${escapeHtml(message)}</span>
+  `;
+
+  // Newest on top
+  feedList.insertBefore(entry, feedList.firstChild);
+
+  // Trim to max
+  const entries = feedList.querySelectorAll('.feed-entry');
+  if (entries.length > MAX_FEED) {
+    entries[entries.length - 1].remove();
   }
+}
 
-  // ── Button handlers ───────────────────────────────────────────────────────
-  btnSave.addEventListener('click', function () {
-    send({ type: 'save_session' });
-    addFeedEntry('INFO', 'Save session requested');
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const url   = `${proto}//${location.host}/ws/dashboard`;
+  ws          = new WebSocket(url);
+
+  ws.addEventListener('open', () => {
+    addFeedEntry('CONNECT', 'Connected to hub');
+    send({ type: 'request_state' });
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   });
 
-  btnLoadTrigger.addEventListener('click', function () {
-    fileInput.click();
+  ws.addEventListener('close', () => {
+    addFeedEntry('ERROR', 'Disconnected from hub \u2014 reconnecting\u2026');
+    ws = null;
+    reconnectTimer = setTimeout(connect, 3000);
   });
 
-  fileInput.addEventListener('change', function () {
-    const file = fileInput.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = function (e) {
-      let parsed;
-      try { parsed = JSON.parse(e.target.result); } catch {
-        addFeedEntry('ERROR', 'Failed to parse session file — invalid JSON');
-        return;
+  ws.addEventListener('error', () => {
+    // close event will follow
+  });
+
+  ws.addEventListener('message', (evt) => {
+    // Ignore binary frames (audio/model data not for dashboard)
+    if (evt.data instanceof ArrayBuffer || evt.data instanceof Blob) return;
+    let msg;
+    try { msg = JSON.parse(evt.data); } catch { return; }
+    handleMessage(msg);
+  });
+}
+
+function handleMessage(msg) {
+  switch (msg.type) {
+
+    case 'versions': {
+      const versions = msg.data || [];
+      buildVersionList(versions);
+      // If currently selected version is in the new list, reload preview
+      if (selectedVersionId) {
+        const match = versions.find(v => v.id === selectedVersionId);
+        if (match && match.scene_data) {
+          loadVersionIntoPreview(match.scene_data);
+          captureVersionThumbnail(match.id);
+        }
       }
-      send({ type: 'load_session', data: parsed });
-      addFeedEntry('INFO', `Session loaded from file: ${file.name}`);
-    };
-    reader.readAsText(file);
-    // Reset so same file can be loaded again
-    fileInput.value = '';
-  });
+      break;
+    }
 
-  // ── Init ──────────────────────────────────────────────────────────────────
-  connect();
+    case 'command_log': {
+      const ts = msg.timestamp;
+      if (msg.command)  addFeedEntry('VOICE',    msg.command,  ts);
+      if (msg.response) addFeedEntry('RESPONSE', msg.response, ts);
+      break;
+    }
 
-}());
+    case 'connection_status':
+      setDot(dotAR,   !!msg.ar_connected);
+      setDot(dotCtrl, !!msg.controller_connected);
+      break;
+
+    default:
+      break;
+  }
+}
+
+// ── Button handlers ───────────────────────────────────────────────────────────
+btnSave.addEventListener('click', () => {
+  send({ type: 'save_session' });
+  addFeedEntry('INFO', 'Session saved');
+});
+
+btnLoadTrigger.addEventListener('click', () => {
+  fileInput.click();
+});
+
+fileInput.addEventListener('change', () => {
+  const file = fileInput.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    let parsed;
+    try { parsed = JSON.parse(e.target.result); } catch {
+      addFeedEntry('ERROR', 'Failed to parse session file — invalid JSON');
+      return;
+    }
+    send({ type: 'load_session', data: parsed });
+    addFeedEntry('INFO', `Session loaded from file: ${file.name}`);
+  };
+  reader.readAsText(file);
+  fileInput.value = '';
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+connect();
 </script>
 </body>
 </html>

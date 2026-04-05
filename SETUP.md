@@ -20,21 +20,15 @@ The system works WITHOUT these configured — it falls back to the built-in comm
 # Get your PC's WiFi IP address
 ipconfig
 
-# Create export directory
-mkdir C:\tmp
-
 # Install hub dependencies
 cd dio-design\hub
 pip install -r requirements.txt
 
-# Open Blender
-# → Press N in viewport → BlenderMCP tab → Connect
-# → Verify "Listening on port 9876"
-
 # Start hub server
-# On Windows (load .env vars):
-# Either set vars manually or use python-dotenv
 python server.py
+
+# Open the Designer Dashboard in a browser
+# http://localhost:8080/dashboard
 ```
 
 The hub starts on http://0.0.0.0:8080. Note your IP for the S25.
@@ -46,6 +40,14 @@ The hub starts on http://0.0.0.0:8080. Note your IP for the S25.
 1. Open Chrome → `chrome://flags/#unsafely-treat-insecure-origin-as-secure`
 2. Enter: `http://YOUR_PC_IP:8080`
 3. Set to **Enabled** → Relaunch Chrome
+
+### VR/Cardboard headset (optional)
+If using a Cardboard-style VR headset with the S25:
+1. Open Chrome → `chrome://flags/#webxr-incubations`
+2. Set to **Enabled** → Relaunch Chrome
+3. Also enable `chrome://flags/#cardboard-headset` if available
+
+The AR viewer will automatically fall back to immersive-vr mode with camera passthrough if immersive-ar is not available.
 
 ### Launch AR
 
@@ -87,7 +89,11 @@ python3 controller/udp_sender.py YOUR_PC_IP 9877
 ## 6. Troubleshooting
 
 **Check hub health:** `http://YOUR_PC_IP:8080/health`
-— Shows Blender connection status, Qualcomm AI config, ElevenLabs config
+— Shows Qualcomm AI config and ElevenLabs config
+
+**Dashboard not loading:** Open http://YOUR_PC_IP:8080/dashboard in a browser on the AI PC.
+
+**3D preview empty:** Speak a command in AR first to create a version.
 
 **AR not working:** Use Chrome, not Samsung Internet. Set the Chrome flag. Same WiFi.
 
