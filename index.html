@@ -37,6 +37,15 @@
   }
   #start-btn:active { background: rgba(136,204,255,0.3); transform: scale(0.97); }
   #start-btn:disabled { opacity: 0.3; }
+  #vr-btn {
+    padding: 1rem 3rem; font-size: 1rem;
+    border: 1px solid rgba(204,136,255,0.4);
+    background: rgba(204,136,255,0.1);
+    color: #cc88ff; border-radius: 2rem;
+    cursor: pointer; letter-spacing: 0.1em; text-transform: uppercase;
+  }
+  #vr-btn:active { background: rgba(204,136,255,0.3); transform: scale(0.97); }
+  #vr-btn:disabled { opacity: 0.3; }
   #landing .error { color: #ff6666; margin-top: 1rem; font-size: 0.8rem; }
   #ar-overlay { position:fixed;inset:0;pointer-events:none;z-index:50;display:none; }
   #ar-overlay.active { display: block; }
@@ -81,7 +90,10 @@
 <div id="landing">
   <h1>Dio</h1>
   <p>Voice-Controlled AR Workspace</p>
-  <button id="start-btn">Enter AR</button>
+  <div id="mode-btns" style="display:flex;gap:1rem;">
+    <button id="start-btn">Enter AR</button>
+    <button id="vr-btn">Enter VR</button>
+  </div>
   <div class="error" id="error-msg" style="display:none"></div>
 </div>
 <div id="ar-overlay">
@@ -470,7 +482,7 @@ const state = {
 
 const $=(id)=>document.getElementById(id);
 const dom = {
-  landing:$('landing'), startBtn:$('start-btn'), errorMsg:$('error-msg'),
+  landing:$('landing'), startBtn:$('start-btn'), vrBtn:$('vr-btn'), errorMsg:$('error-msg'),
   overlay:$('ar-overlay'), connDot:$('conn-dot'), statusText:$('status-text'),
   bubble:$('avatar-bubble'), transcript:$('transcript'),
   micBtn:$('mic-btn'), placeHint:$('place-hint'),
@@ -784,9 +796,10 @@ dom.micBtn.addEventListener('click',(e)=>{ e.stopPropagation(); e.preventDefault
 let longPressTimer = null;
 
 // XR
-async function initXR(){
+async function initXR(mode='ar'){
   if(!navigator.xr){showErr('WebXR not available');return;}
-  if(!await navigator.xr.isSessionSupported('immersive-ar')){showErr('Immersive AR not supported');return;}
+  if(mode==='ar' && !await navigator.xr.isSessionSupported('immersive-ar')){showErr('Immersive AR not supported');return;}
+  if(mode==='vr' && !await navigator.xr.isSessionSupported('immersive-vr').catch(()=>false)){showErr('Immersive VR not supported on this device');return;}
 
   const ren = new THREE.WebGLRenderer({antialias:true,alpha:true});
   ren.setPixelRatio(devicePixelRatio); ren.setSize(innerWidth,innerHeight); ren.xr.enabled=true;
@@ -842,23 +855,15 @@ async function initXR(){
   initVoice();
 
   try{
-    // Try immersive-ar first; fall back to immersive-vr with video passthrough
-    let sess, sessionMode = 'immersive-ar';
-    const arSupported = await navigator.xr.isSessionSupported('immersive-ar').catch(()=>false);
-    if(arSupported){
-      sess = await navigator.xr.requestSession('immersive-ar',{
-        requiredFeatures:['hit-test','local'],
-        optionalFeatures:['dom-overlay'],
-        domOverlay:{root:dom.overlay},
-      });
-    } else {
-      sessionMode = 'immersive-vr';
+    // Session mode: 'ar' uses hit-test AR; 'vr' requests immersive-vr for stereo headset
+    let sess, sessionMode = mode;
+    if(mode === 'vr'){
       sess = await navigator.xr.requestSession('immersive-vr',{
         requiredFeatures:['local'],
-        optionalFeatures:['dom-overlay'],
+        optionalFeatures:['dom-overlay','local-floor'],
         domOverlay:{root:dom.overlay},
       });
-      // Video passthrough background for VR mode
+      // Camera passthrough background so the real world is visible through headset lenses
       try {
         const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
         const video = document.createElement('video');
@@ -867,6 +872,32 @@ async function initXR(){
         video.play();
         scene.background = new THREE.VideoTexture(video);
       } catch(ve){ console.warn('Video passthrough unavailable:', ve.message); }
+    } else {
+      // AR mode: try immersive-ar first, fall back to immersive-vr
+      const arSupported = await navigator.xr.isSessionSupported('immersive-ar').catch(()=>false);
+      if(arSupported){
+        sessionMode = 'immersive-ar';
+        sess = await navigator.xr.requestSession('immersive-ar',{
+          requiredFeatures:['hit-test','local'],
+          optionalFeatures:['dom-overlay'],
+          domOverlay:{root:dom.overlay},
+        });
+      } else {
+        sessionMode = 'immersive-vr';
+        sess = await navigator.xr.requestSession('immersive-vr',{
+          requiredFeatures:['local'],
+          optionalFeatures:['dom-overlay'],
+          domOverlay:{root:dom.overlay},
+        });
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+          const video = document.createElement('video');
+          video.srcObject = stream; video.autoplay = true; video.playsInline = true;
+          await new Promise(r => video.onloadedmetadata = r);
+          video.play();
+          scene.background = new THREE.VideoTexture(video);
+        } catch(ve){ console.warn('Video passthrough unavailable:', ve.message); }
+      }
     }
     ren.xr.setReferenceSpaceType('local');
     await ren.xr.setSession(sess);
@@ -875,8 +906,8 @@ async function initXR(){
 
     const vs = await sess.requestReferenceSpace('viewer');
     state.localRef = await sess.requestReferenceSpace('local');
-    if(sessionMode === 'immersive-ar'){
-        state.hitTestSource = await sess.requestHitTestSource({space:vs});
+    if(sessionMode === 'immersive-ar' || sessionMode === 'ar'){
+        state.hitTestSource = await sess.requestHitTestSource({space:vs}).catch(()=>null);
       }
 
     sess.addEventListener('select',(e)=>{
@@ -898,6 +929,7 @@ async function initXR(){
     sess.addEventListener('end',()=>{
       state.xrSession=null; dom.landing.style.display='flex'; dom.overlay.classList.remove('active');
       dom.startBtn.disabled=false; dom.startBtn.textContent='Enter AR';
+      dom.vrBtn.disabled=false; dom.vrBtn.textContent='Enter VR';
       if(state.recognition && state.listening){
         state.listening=false; state.recognition.stop(); state.voiceAn.stop();
         dom.micBtn.classList.remove('listening');
@@ -945,7 +977,8 @@ async function initXR(){
 }
 
 function showErr(m){ dom.errorMsg.textContent=m; dom.errorMsg.style.display='block'; dom.startBtn.disabled=true; }
-dom.startBtn.addEventListener('click',()=>{ dom.startBtn.disabled=true; dom.startBtn.textContent='Starting...'; initXR(); });
+dom.startBtn.addEventListener('click',()=>{ dom.startBtn.disabled=true; dom.vrBtn.disabled=true; dom.startBtn.textContent='Starting...'; initXR('ar'); });
+dom.vrBtn.addEventListener('click',()=>{ dom.vrBtn.disabled=true; dom.startBtn.disabled=true; dom.vrBtn.textContent='Starting VR...'; initXR('vr'); });
 (async()=>{
   if(!navigator.xr){showErr('WebXR not available');return;}
   if(!await navigator.xr.isSessionSupported('immersive-ar')) showErr('Immersive AR not supported');
