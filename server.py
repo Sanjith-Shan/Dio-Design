@@ -90,66 +90,79 @@ controller_connected: bool         = False
 # ─── Personality Audio Lines ──────────────────────────────────────────────────
 import random
 
+# Punctuation guide (affects ElevenLabs delivery):
+#   comma      → short breath / beat
+#   em dash —  → longer dramatic pause, interruption feel
+#   ellipsis … → trailing, thoughtful slow-down
+#   period .   → full stop, gives weight to what just landed
+#   !          → energy spike, not overused
+#   ?          → rising inflection
+
 THINKING_LINES = [
-    "Right, givin' it a look…",
-    "One sec, one sec, I'm on it.",
+    "Right… givin' it a look.",
+    "One sec — one sec. I'm on it.",
     "Ah yeah, leave it with me.",
-    "Grand, grand — just a moment.",
+    "Grand, grand… just a moment.",
     "Aye, workin' on it now.",
-    "Hold on, I'm thinkin'.",
-    "Right so, let me sort that out.",
+    "Hold on… I'm thinkin'.",
+    "Right so — let me sort that out.",
     "On it. Don't rush me.",
+    "Give me a second… nearly there.",
+    "Okay, okay — I see what you're after.",
 ]
 
 DONE_LINES = [
-    "There ya go! Easy as that.",
+    "There ya go. Easy as that.",
     "Done and dusted — have a look at that.",
     "Boom. Wasn't even hard.",
     "Right, that's sorted. What's next?",
-    "There she is! Lovely job if I say so.",
+    "There she is… lovely, if I say so.",
     "Ha! Done already. What else ya got?",
     "Nailed it. As per usual.",
+    "Right — all done. Not bad, yeah?",
 ]
 
 ERROR_LINES = [
-    "Ah for— that didn't work. Try again, would ya?",
+    "Ah, for— … that didn't work. Try again, would ya?",
     "Right, that went sideways. My fault. Go again.",
-    "Hmm. That's not ideal. Give me another shot.",
+    "Hmm… that's not ideal. Give me another shot.",
     "Ah, something went wrong there. Tell me again.",
+    "That one's on me. Say it again — I'll get it.",
 ]
 
 GREETING_LINES = [
-    "Ah, there ya are! Ready when you are.",
-    "Dio here — let's build somethin' class.",
-    "Right, I'm all ears. What are we makin'?",
+    "Ah, there ya are. Ready when you are.",
+    "Dee-oh here — let's build somethin' class.",
+    "Right… I'm all ears. What are we makin'?",
+    "Oh good, you're back. I was gettin' bored.",
 ]
 
-# Random tangents — project opinions, day-talk, unsolicited commentary.
-# Fires ~30% of the time alongside a thinking line to feel like a real conversation.
+# Random tangents — fires ~30% of the time mid-thinking to feel like a real conversation.
+# Punctuated for natural delivery: commas for breath, dashes for beats, ellipsis for drift.
 MUSINGS = [
     # Project opinions
-    "I have to say, this is shappin' up to be a deadly looking thing.",
-    "You know, most people wouldn't even attempt this in AR. Mad respect.",
-    "I think the whole vibe of this project is class. Just sayin'.",
-    "Between you and me, I reckon this'll look gas when it's all done.",
-    "This is actually one of the more interesting things I've built. No offence to the others.",
+    "I have to say… this is shapin' up to be a deadly thing.",
+    "You know — most people wouldn't even attempt this in AR. Mad respect.",
+    "The whole vibe of this? Class. Just sayin'.",
+    "Between you and me… I reckon this'll look gas when it's done.",
+    "This is, honestly, one of the more interesting things I've built. No offence to the others.",
     "I'd put this up against anything I've seen. Genuinely.",
-    "Right, I'm not just saying this — the scale of this is impressive.",
-    "D'ya know what, I think you've got a real eye for this stuff.",
-    # Unsolicited design opinions
+    "Right — I'm not just sayin' this. The scale of this is impressive.",
+    "D'ya know what… I think you've got a real eye for this stuff.",
+    # Unsolicited design takes
     "Honestly? I think it could use a bit more depth. Just a thought.",
-    "Not sure about that last placement, but I'll keep me mouth shut.",
+    "Not sure about that last placement… but I'll keep me mouth shut.",
     "I'd maybe push the whole thing back a bit. But what do I know.",
-    "Something about the lighting in here is annoying me. I'll figure it out.",
+    "Something about the lighting in here is annoyin' me. I'll sort it.",
     # Day-talk / personal
     "I've been in worse scenes, I'll tell ya that much.",
-    "Been a busy one. You're like the fourth person to ask me something today.",
-    "I was just thinkin' about whether polygons dream. Anyway.",
-    "D'ya ever just stare at a mesh and feel something? No? Just me so.",
-    "I had a whole plan for today and now look at me. Lovin' it though.",
+    "Been a busy one. You're, like, the fourth person to ask me something today.",
+    "I was just thinkin' about whether polygons dream… anyway.",
+    "D'ya ever just stare at a mesh and feel something? No? Just me, so.",
+    "I had a whole plan for today — and now look at me. Lovin' it though.",
     "Right, I haven't had a break since this session started. Worth it.",
-    # Mild existential / character
-    "Sometimes I wonder what I'd build if nobody was asking me to.",
+    # Mild existential
+    "Sometimes I wonder… what I'd build if nobody was askin' me to.",
     "Living in AR isn't as weird as you'd think. It's grand, actually.",
     "I exist in three dimensions and somehow I still feel flat some days.",
     "People always ask me to make things. Never ask how I'm doin'.",
@@ -180,6 +193,15 @@ PERSONALITY RULES (these apply to ALL spoken responses):
 - When finishing a task, be proud and a little smug. You earned it.
 - Never say "Certainly!", "Of course!", "Sure thing!" — that's corporate. You're a character.
 - If someone asks something conversational, chat back naturally, then nudge them back to building.
+
+PUNCTUATION FOR NATURAL SPEECH (critical — ElevenLabs uses punctuation to control pacing):
+- Comma ,    → short breath, a beat. Use mid-sentence to let a thought land.
+- Em dash —  → longer dramatic pause or interruption. Good for emphasis or a pivot.
+- Ellipsis … → trailing off, thoughtful slowdown. Use when drifting or hesitating.
+- Period .   → full stop. Short sentences with periods hit harder than long ones.
+- Exclamation ! → energy spike. Use sparingly or it loses meaning.
+- Never write a spoken line longer than 15 words without a pause mark in the middle.
+- Refer to yourself as "Dee-oh" in spoken text (not "Dio") so it's pronounced correctly.
 
 SCENE CONTEXT: Tabletop/miniature scale (~1m × 0.6m desk surface). Objects sit at y=0.
 - Cup: 0.08m tall, 0.04m radius  |  Car: 0.3m × 0.12m × 0.08m
@@ -346,6 +368,17 @@ def extract_spoken_text(llm_response: str) -> str:
     return text if text else "Done!"
 
 
+def _prepare_tts(text: str) -> str:
+    """Sanitise text before sending to ElevenLabs.
+
+    - Replaces 'Dio' with 'Dee-oh' so ElevenLabs pronounces it correctly
+      (like the 'geo' in geode, not the 'di' in diode).
+    """
+    text = re.sub(r'\bDio\b', 'Dee-oh', text)
+    text = re.sub(r'\bDIO\b', 'Dee-oh', text)
+    return text
+
+
 # ─── ElevenLabs TTS ───────────────────────────────────────────────────────────
 
 async def text_to_speech(text: str) -> Optional[bytes]:
@@ -360,13 +393,13 @@ async def text_to_speech(text: str) -> Optional[bytes]:
         "Content-Type": "application/json",
     }
     payload = {
-        "text": text,
+        "text": _prepare_tts(text),
         "model_id": "eleven_multilingual_v2",
         "voice_settings": {
             "stability": 0.5,
             "similarity_boost": 0.75,
             "style": 0.3,
-            "speed": 0.75,
+            "speed": 0.80,
         },
     }
 
