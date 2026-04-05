@@ -1,0 +1,28 @@
+# Environment and secrets
+.env
+*.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+
+# Exports (generated at runtime)
+*.glb
+*.gltf
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Node (if any)
+node_modules/

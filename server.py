@@ -75,6 +75,8 @@ pick_mode_active:  bool            = False
 pick_imu_origin:   list            = None
 last_voice_command: str            = ""
 current_scene_manifest: list       = []  # [{name, type}] — updated on every scene_state
+pending_voice_save: bool           = False  # True only between voice execute and its scene_state ack
+conversation_history: List[Dict]   = []  # Last N turns for LLM context continuity
 
 # ─── LLM System Prompt ────────────────────────────────────────────────────────
 
@@ -166,7 +168,13 @@ If the user is conversational (no modeling command), respond warmly without any 
 # ─── Qualcomm Cloud AI LLM ────────────────────────────────────────────────────
 
 async def call_qualcomm_llm(user_message: str) -> Optional[str]:
-    """POST a prompt to Qualcomm Cloud AI 100 and return the response text."""
+    """POST a prompt to Qualcomm Cloud AI 100 and return the response text.
+
+    Injects conversation_history so the LLM sees its own prior code and can
+    reliably reference, modify, or remove previously created objects.
+    """
+    global conversation_history
+
     if not QUALCOMM_AI_API_KEY:
         log.warning("Qualcomm AI not configured, falling back to built-in parser")
         return None
@@ -175,18 +183,32 @@ async def call_qualcomm_llm(user_message: str) -> Optional[str]:
         "Authorization": f"Bearer {QUALCOMM_AI_API_KEY}",
         "Content-Type": "application/json",
     }
-    # Append current scene objects so LLM knows what exists
+
+    # Build rich scene context appended to the user message
     user_content = user_message
     if current_scene_manifest:
-        names = ", ".join(f"'{o['name']}' ({o.get('type','mesh')})" for o in current_scene_manifest if o.get('name'))
-        user_content += f"\n\nCURRENT SCENE OBJECTS: {names}"
+        scene_lines = []
+        for o in current_scene_manifest:
+            name = o.get("name", "")
+            if not name:
+                continue
+            obj_type = o.get("type", "mesh")
+            children = o.get("children", [])
+            parts = f" ({len(children)} parts)" if obj_type == "group" and children else ""
+            scene_lines.append(f"  - '{name}' ({obj_type}{parts})")
+        if scene_lines:
+            user_content += "\n\nCURRENT SCENE OBJECTS (use scene.getObjectByName(name) to access them):\n"
+            user_content += "\n".join(scene_lines)
+
+    # Build messages array: system + last 3 turns of history + current user message
+    messages = [{"role": "system", "content": THREEJS_SYSTEM_PROMPT}]
+    # Keep last 6 history entries (3 user + 3 assistant turns) to stay within token budget
+    messages.extend(conversation_history[-6:])
+    messages.append({"role": "user", "content": user_content})
 
     payload = {
         "model": QUALCOMM_AI_MODEL,
-        "messages": [
-            {"role": "system", "content": THREEJS_SYSTEM_PROMPT},
-            {"role": "user",   "content": user_content},
-        ],
+        "messages": messages,
         "max_tokens": 2048,
         "temperature": 0.3,
         "stream": False,
@@ -200,7 +222,17 @@ async def call_qualcomm_llm(user_message: str) -> Optional[str]:
                 return None
             data = resp.json()
             content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-            return content if content else None
+            if not content:
+                return None
+
+            # Append this turn to conversation history so future calls have context
+            conversation_history.append({"role": "user",      "content": user_content})
+            conversation_history.append({"role": "assistant", "content": content})
+            # Cap history at 8 entries (4 turns) to prevent unbounded growth
+            if len(conversation_history) > 8:
+                conversation_history = conversation_history[-8:]
+
+            return content
     except Exception as e:
         log.error(f"Qualcomm AI request failed: {e}")
         return None
@@ -493,7 +525,7 @@ def parse_command_to_threejs(text: str) -> Optional[str]:
 
 async def process_voice_command(text: str):
     """Main pipeline: LLM → three.js code → broadcast to AR viewer + dashboard."""
-    global last_voice_command
+    global last_voice_command, pending_voice_save
     last_voice_command = text
     log.info(f"Voice command: {text!r}")
 
@@ -512,6 +544,9 @@ async def process_voice_command(text: str):
         spoken_text = extract_spoken_text(llm_response)
 
         if js_code:
+            # Arm the version-save gate: only the next scene_state from this execute
+            # should create a version; controller-driven scene_states are ignored
+            pending_voice_save = True
             await broadcast_ar({"type": "execute", "code": js_code})
 
         # TTS regardless of whether there was code
@@ -533,6 +568,7 @@ async def process_voice_command(text: str):
     js_code = parse_command_to_threejs(text)
 
     if js_code:
+        pending_voice_save = True
         await broadcast_ar({"type": "execute", "code": js_code})
         await broadcast_ar({"type": "avatar", "state": "done", "text": "Done!"})
         return
@@ -757,23 +793,30 @@ async def ar_websocket(ws: WebSocket):
                 await process_voice_command(message["text"])
 
             elif msg_type == "scene_state":
-                global current_scene_manifest
+                global current_scene_manifest, pending_voice_save
                 # When AR client echoes state after a load_state, just update manifest — don't save a new version
                 if message.get("from_load"):
                     current_scene_manifest = message.get("manifest", [])
                 elif message.get("error"):
                     err = message["error"]
                     log.error(f"Code execution error on phone: {err}")
+                    # Disarm the gate — this voice command failed, don't save a version
+                    pending_voice_save = False
                     await broadcast_ar({"type": "avatar", "state": "error", "text": "Hmm, that didn't work. Try again?"})
                     await broadcast_dashboard({"type": "command_log", "response": f"ERROR: {err}", "timestamp": datetime.utcnow().isoformat()})
                 else:
-                    # Update manifest from message
+                    # Always keep manifest current regardless of whether we save a version
                     current_scene_manifest = message.get("manifest", [])
-                    command = message.get("command", last_voice_command)
-                    scene_data = message.get("data", {})
-                    version = save_version(command, scene_data)
-                    await push_versions_to_dashboard()
-                    log.info(f"Scene state saved as version {version['version']} — {len(current_scene_manifest)} objects")
+                    # Only save a version if this scene_state was triggered by a voice command
+                    if pending_voice_save:
+                        pending_voice_save = False  # Consume the gate — exactly one version per command
+                        command = message.get("command", last_voice_command)
+                        scene_data = message.get("data", {})
+                        version = save_version(command, scene_data)
+                        await push_versions_to_dashboard()
+                        log.info(f"Scene state saved as version {version['version']} — {len(current_scene_manifest)} objects")
+                    else:
+                        log.debug(f"Scene state received (not from voice command) — manifest updated, no version saved")
 
             elif msg_type == "debug":
                 log.info(f"[PHONE] {message.get('message', '')}")
