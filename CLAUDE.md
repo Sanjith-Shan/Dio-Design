@@ -2,44 +2,51 @@
 
 ## What is Dio Design?
 
-Dio Design is a voice-controlled mixed-reality CAD workspace for a Qualcomm hackathon. A user speaks natural language commands to manipulate 3D models in Blender, sees the results live in augmented reality on a Samsung Galaxy S25 Ultra, and uses a wireless Arduino UNO Q controller for fine-grained input like scaling and undo/redo.
+Dio Design is a voice-controlled mixed-reality CAD workspace for a Qualcomm hackathon. A user speaks natural language commands, the LLM generates three.js code, and that code executes directly in the live AR scene on a Samsung Galaxy S25 Ultra. No Blender, no export pipeline — changes appear in real time. A wireless Arduino UNO Q controller provides fine-grained input for scaling, rotation, and picking up objects.
 
 ## Architecture (4 Qualcomm platforms)
 
-1. **Qualcomm Cloud AI 100** — LLM inference via REST API (generates Blender Python code from voice)
-2. **AI PC / Copilot+ (Snapdragon X Elite)** — Hub server (FastAPI), Blender, orchestration
-3. **Samsung S25 Ultra (Snapdragon 8 Elite)** — WebXR AR viewer in Chrome, voice input, Dio avatar
+1. **Qualcomm Cloud AI 100** — LLM inference (Llama-3.1-8B at https://aisuite.cirrascale.com/apis/v2/chat/completions) — generates three.js JS code from voice commands
+2. **AI PC / Copilot+ (Snapdragon X Elite)** — Hub server (FastAPI), Designer Dashboard, orchestration, version control
+3. **Samsung S25 Ultra (Snapdragon 8 Elite)** — WebXR AR viewer in Chrome, voice input, Dio avatar, three.js scene execution
 4. **Arduino UNO Q (Dragonwing QRB2210)** — Wireless 6-DOF controller (IMU + joystick + buttons over WiFi UDP)
 
 ## Project Structure
 
 ```
 dio-design/
-├── ARCHITECTURE.md          # Full system design, message protocol, data flows
+├── ARCHITECTURE.md          # Full system design
+├── CLAUDE.md                # This file
 ├── SETUP.md                 # Hackathon day quickstart
 ├── .env.example             # Environment variables template
 ├── start.bat                # Windows startup script
-├── hub/
-│   ├── server.py            # Central FastAPI hub (the main orchestrator)
-│   └── requirements.txt     # Python deps
-├── ar/
-│   └── index.html           # WebXR AR viewer + Dio avatar (served by hub)
+├── server.py                # Central FastAPI hub
+├── requirements.txt         # Python deps
+├── index.html               # WebXR AR viewer + Dio avatar (served at /)
+├── dashboard.html           # Designer Dashboard (served at /dashboard)
+├── versions/                # Auto-created, stores scene version JSON files
 └── controller/
-    ├── firmware.ino          # Arduino sketch for UNO Q MCU
+    ├── firmware.ino         # Arduino sketch for UNO Q MCU
     └── udp_sender.py        # Python UDP forwarder for UNO Q Linux side
 ```
 
 ## Key Technical Details
 
-- **Hub server** (`hub/server.py`): FastAPI app. Connects to Blender addon via TCP socket on port 9876. Accepts WebSocket from S25 on /ws/ar. Listens for UDP from UNO Q on port 9877. Calls Qualcomm Cloud AI for LLM inference. Calls ElevenLabs for TTS. Has a fallback command parser for testing without cloud services.
+- **Hub server** (`server.py`): FastAPI app. Routes voice commands to Qualcomm Cloud AI, extracts three.js code from LLM response, sends it to AR viewer via WebSocket as `{type:"execute","code":"..."}`. Receives scene state back, saves versions. Serves AR viewer at `/` and dashboard at `/dashboard`. Listens for UDP from UNO Q on port 9877. Calls ElevenLabs for TTS.
 
-- **AR viewer** (`ar/index.html`): Single-file WebXR app using three.js r162. Uses `immersive-ar` with `hit-test` for surface placement. Loads glTF models pushed from hub. Contains the Dio avatar — a procedural animated star character with eyes, mouth, blinking, personality quirks, and continuous emotion blending. Uses Web Speech API for voice input and Web Audio API AnalyserNode for voice amplitude detection.
+- **AR viewer** (`index.html`): Single-file WebXR app using three.js r162. Receives `{type:"execute","code":"..."}` from hub and runs it with `new Function('THREE','scene','camera','renderer','GLTFLoader', code)(...)`. After execution, serializes scene state and sends it back to hub. Handles state loading (`load_state`), GLB export (`trigger_export`). Contains the Dio avatar.
 
-- **Avatar animation system**: NOT a rigid state machine. Uses continuous values (energy, attention, happiness) that lerp toward targets. Features: organic floating motion (layered sine waves), squash-and-stretch spring physics on transitions, random personality quirks (tilt, shiver, bounce, look-around), blinking at random intervals, eye gaze wandering, voice attention (leans forward and glows when user speaks), completion orbit (arcs around model when command finishes).
+- **Designer Dashboard** (`dashboard.html`): Runs in a browser on the AI PC. Shows version timeline, live activity feed, connection status. Allows loading previous versions, triggering GLB exports, saving/loading sessions.
 
-- **Communication protocol**: All messages are JSON over WebSocket (S25↔Hub) or UDP (UNO Q→Hub). Model data is sent as binary WebSocket frames (glTF GLB). Audio from ElevenLabs is sent as binary frames (mp3).
+- **Version control**: Hub stores every scene state (triggered by voice commands or controller actions) as a version with timestamp, command, and serialized scene data. Undo/redo steps through this list. Versions persist to disk in `versions/`.
 
-- **LLM system prompt**: The hub sends a system prompt that instructs the LLM to output valid bpy code in ```python``` blocks along with a brief friendly spoken response. The hub extracts the code (executes in Blender) and the text (sends to ElevenLabs for TTS).
+- **Communication protocol**: Voice → AR viewer sends `{type:"voice",text:"...",final:true}` → Hub calls LLM → Hub sends `{type:"execute","code":"..."}` to AR → AR executes JS → AR sends `{type:"scene_state",data:{...}}` back → Hub saves version → Hub notifies Dashboard.
+
+- **Avatar animation system**: Continuous emotional values (energy, attention, happiness) that lerp toward targets. Organic floating motion, squash-and-stretch, random personality quirks, blinking, voice attention effects. NOT a state machine.
+
+- **LLM system prompt**: Instructs the LLM to output valid three.js JS code in ```javascript``` blocks operating on globals `THREE`, `scene`, `camera`, `renderer`, `GLTFLoader`. Hub extracts the code and sends it to the AR viewer for direct execution.
+
+- **Controller**: Joystick Y axis scales objects, IMU gyro rotates objects, pick button + accelerometer moves objects in 3D. Undo/redo steps through scene versions.
 
 ## Environment Variables
 
@@ -47,9 +54,6 @@ See `.env.example`. The system gracefully degrades — works without Qualcomm AI
 
 ## Things That Still Need Work
 
-- OpenClaw integration (optional — hub currently handles LLM calls directly)
-- IMU-based model rotation from controller (firmware sends data, hub doesn't process it yet)
-- Pick-up gesture (hold button + IMU to move model in 3D)
-- HTTPS for production (currently uses Chrome flag workaround for WebXR over HTTP)
-- Replacing procedural star avatar with Blender-modeled version (optional)
-- Audio playback handler in AR viewer (hub sends audio, viewer needs to decode and play mp3 binary)
+- HTTPS cert for real-device WebXR (env var USE_HTTPS=true, generate cert with openssl)
+- Load Session from file (dashboard has the UI, server needs a load_session handler)
+- Controller pick gesture for XR model repositioning (hub side done, AR side visual feedback done)
