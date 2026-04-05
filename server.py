@@ -767,6 +767,7 @@ async def export_version(version_id: str):
 
 @app.websocket("/ws/ar")
 async def ar_websocket(ws: WebSocket):
+    global current_scene_manifest, pending_voice_save, version_index
     await ws.accept()
     ar_clients.append(ws)
     log.info(f"AR client connected ({len(ar_clients)} total)")
@@ -802,7 +803,6 @@ async def ar_websocket(ws: WebSocket):
                 await process_voice_command(message["text"], selected_object)
 
             elif msg_type == "scene_state":
-                global current_scene_manifest, pending_voice_save, version_index
                 # When AR client echoes state after a load_state, just update manifest — don't save a new version
                 if message.get("from_load"):
                     current_scene_manifest = message.get("manifest", [])
