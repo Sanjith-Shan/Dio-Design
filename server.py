@@ -802,7 +802,7 @@ async def ar_websocket(ws: WebSocket):
                 await process_voice_command(message["text"], selected_object)
 
             elif msg_type == "scene_state":
-                global current_scene_manifest, pending_voice_save
+                global current_scene_manifest, pending_voice_save, version_index
                 # When AR client echoes state after a load_state, just update manifest — don't save a new version
                 if message.get("from_load"):
                     current_scene_manifest = message.get("manifest", [])
@@ -834,7 +834,6 @@ async def ar_websocket(ws: WebSocket):
                 await ws.send_text(json.dumps({"type": "pong"}))
 
             elif msg_type == "request_undo":
-                global version_index
                 if version_index > 0:
                     version_index -= 1
                     await broadcast_ar({
