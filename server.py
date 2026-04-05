@@ -77,6 +77,8 @@ last_voice_command: str            = ""
 current_scene_manifest: list       = []  # [{name, type}] — updated on every scene_state
 pending_voice_save: bool           = False  # True only between voice execute and its scene_state ack
 conversation_history: List[Dict]   = []  # Last N turns for LLM context continuity
+prev_buttons:        dict          = {"pick": False, "undo": False, "redo": False, "joy_btn": False}
+controller_connected: bool         = False
 
 # ─── LLM System Prompt ────────────────────────────────────────────────────────
 
@@ -523,11 +525,11 @@ def parse_command_to_threejs(text: str) -> Optional[str]:
 
 # ─── Voice Command Processor ─────────────────────────────────────────────────
 
-async def process_voice_command(text: str):
+async def process_voice_command(text: str, selected_object: str = ""):
     """Main pipeline: LLM → three.js code → broadcast to AR viewer + dashboard."""
     global last_voice_command, pending_voice_save
     last_voice_command = text
-    log.info(f"Voice command: {text!r}")
+    log.info(f"Voice command: {text!r}" + (f" [selected: {selected_object}]" if selected_object else ""))
 
     await broadcast_ar({"type": "avatar", "state": "thinking", "text": "Thinking..."})
     await broadcast_dashboard({
@@ -536,8 +538,16 @@ async def process_voice_command(text: str):
         "timestamp": datetime.utcnow().isoformat(),
     })
 
+    # Prepend selection context so the LLM knows what "it"/"this"/"that" refers to
+    effective_text = text
+    if selected_object:
+        effective_text = (
+            f'The user has selected the object named "{selected_object}". '
+            f'When they say "it", "this", or "that", they mean this object.\n\n{text}'
+        )
+
     # ── Try Qualcomm Cloud AI ──
-    llm_response = await call_qualcomm_llm(text)
+    llm_response = await call_qualcomm_llm(effective_text)
 
     if llm_response:
         js_code     = extract_js_code(llm_response)
@@ -580,97 +590,95 @@ async def process_voice_command(text: str):
 # ─── Controller Input Processor ───────────────────────────────────────────────
 
 async def process_controller_input(data: dict):
-    """Handle joystick, buttons, IMU from the UNO Q controller."""
-    global pick_mode_active, pick_imu_origin, version_index
+    """Handle remapped UNO Q controller input.
 
-    joy_y   = data.get("joy_y", 0.0)
+    Button remapping (firmware names → new functions):
+      pick  (D4) → Push-to-talk
+      undo  (D5) → Pick/select object
+      redo  (D6) → Undo last version
+      joy_y      → Scale objects
+    """
+    global pick_mode_active, pick_imu_origin, version_index, prev_buttons, controller_connected
+
+    # Support both flat firmware format (joy_x/joy_y) and nested dict format
+    joy = data.get("joy", {})
+    joy_y = float(data.get("joy_y", joy.get("y", 0.0)))
     buttons = data.get("buttons", {})
-    imu     = data.get("imu", [])
+    imu_raw = data.get("imu", [])
+    if isinstance(imu_raw, dict):
+        imu = [
+            imu_raw.get("ax", 0), imu_raw.get("ay", 0), imu_raw.get("az", 0),
+            imu_raw.get("gx", 0), imu_raw.get("gy", 0), imu_raw.get("gz", 0),
+        ]
+    else:
+        imu = imu_raw
 
-    # ── Joystick → scale all meshes ──
-    if abs(joy_y) > 0.1:
-        scale_factor = round(1.0 + (joy_y * 0.02), 6)
-        await broadcast_ar({
-            "type": "execute",
-            "code": f"scene.children.filter(c=>c.isMesh).forEach(c=>c.scale.multiplyScalar({scale_factor}));",
+    # ── First packet — announce controller connected ──
+    if not controller_connected:
+        controller_connected = True
+        await broadcast_ar({"type": "status", "text": "Controller connected"})
+        await broadcast_dashboard({
+            "type": "command_log", "response": "Controller connected",
+            "timestamp": datetime.utcnow().isoformat(),
         })
+        log.info("Controller connected")
 
-    # ── Undo ──
-    if buttons.get("undo"):
+    # ── Edge detection helpers ──
+    def pressed(btn):  return bool(buttons.get(btn)) and not prev_buttons.get(btn, False)
+    def released(btn): return not buttons.get(btn, False) and prev_buttons.get(btn, False)
+
+    # ── "pick" button → Push-to-talk ──
+    if pressed("pick"):
+        await broadcast_ar({"type": "ptt", "active": True})
+        log.info("Controller: PTT pressed")
+    elif released("pick"):
+        await broadcast_ar({"type": "ptt", "active": False})
+        log.info("Controller: PTT released")
+
+    # ── "undo" button → Pick/select object ──
+    if pressed("undo"):
+        await broadcast_ar({"type": "pick_toggle"})
+        log.info("Controller: pick/select toggled")
+
+    # ── "redo" button → Undo last version ──
+    if pressed("redo"):
         if version_index > 0:
             version_index -= 1
             await broadcast_ar({
                 "type": "load_state",
                 "data": versions[version_index]["scene_data"],
             })
-            log.info(f"Undo → version {versions[version_index]['version']}")
+            log.info(f"Controller: Undo → version {versions[version_index]['version']}")
+        else:
+            log.info("Controller: Undo — already at oldest version")
 
-    # ── Redo ──
-    if buttons.get("redo"):
-        if version_index < len(versions) - 1:
-            version_index += 1
+    # ── Joystick Y → scale (continuous) ──
+    if joy_y > 0.15:
+        await broadcast_ar({"type": "controller_scale", "factor": 1.02})
+    elif joy_y < -0.15:
+        await broadcast_ar({"type": "controller_scale", "factor": 0.98})
+
+    # ── IMU gyro → rotate objects (only when pick button not held) ──
+    if not buttons.get("pick") and len(imu) == 6:
+        gx, gy, gz = imu[3], imu[4], imu[5]
+        gx = gx if abs(gx) > GYRO_DEADZONE else 0.0
+        gy = gy if abs(gy) > GYRO_DEADZONE else 0.0
+        gz = gz if abs(gz) > GYRO_DEADZONE else 0.0
+        if abs(gx) > 0.01 or abs(gy) > 0.01 or abs(gz) > 0.01:
+            rx = round(gx * IMU_SEND_INTERVAL * GYRO_SCALE, 8)
+            ry = round(gy * IMU_SEND_INTERVAL * GYRO_SCALE, 8)
+            rz = round(gz * IMU_SEND_INTERVAL * GYRO_SCALE, 8)
             await broadcast_ar({
-                "type": "load_state",
-                "data": versions[version_index]["scene_data"],
+                "type": "execute",
+                "code": (
+                    f"const _sk=new Set(['ground_plane','model-anchor','dio-avatar','__reticle__','__billboard__']);"
+                    f"scene.children.forEach(c=>{{if(!_sk.has(c.name)&&!c.isLight&&!c.isCamera){{"
+                    f"c.rotation.x+={rx};c.rotation.y+={ry};c.rotation.z+={rz};}}}});"
+                ),
             })
-            log.info(f"Redo → version {versions[version_index]['version']}")
 
-    # ── Pick-up gesture (hold pick button + accelerometer to move model) ──
-    if buttons.get("pick"):
-        if not pick_mode_active:
-            pick_mode_active = True
-            pick_imu_origin  = imu[:3] if len(imu) >= 3 else [0.0, 0.0, 1.0]
-            await broadcast_ar({"type": "pick_mode", "active": True})
-            log.info("Pick mode ON")
-
-        if pick_imu_origin and len(imu) >= 3:
-            dx = imu[0] - pick_imu_origin[0]
-            dy = imu[1] - pick_imu_origin[1]
-            dz = imu[2] - pick_imu_origin[2]
-            dx = dx if abs(dx) > PICK_ACCEL_DEADZONE else 0.0
-            dy = dy if abs(dy) > PICK_ACCEL_DEADZONE else 0.0
-            dz = dz if abs(dz) > PICK_ACCEL_DEADZONE else 0.0
-            if abs(dx) > 0.001 or abs(dy) > 0.001 or abs(dz) > 0.001:
-                mx = round(dx * PICK_MOVE_SCALE, 6)
-                my = round(dy * PICK_MOVE_SCALE, 6)
-                mz = round(dz * PICK_MOVE_SCALE, 6)
-                await broadcast_ar({
-                    "type": "execute",
-                    "code": (
-                        f"scene.children.filter(c=>c.isMesh).forEach(c=>{{"
-                        f"c.position.x+={mx};"
-                        f"c.position.y+={my};"
-                        f"c.position.z+={mz};"
-                        f"}});"
-                    ),
-                })
-    else:
-        if pick_mode_active:
-            pick_mode_active = False
-            pick_imu_origin  = None
-            await broadcast_ar({"type": "pick_mode", "active": False})
-            log.info("Pick mode OFF")
-
-        # ── Gyro-driven rotation (only when not in pick mode) ──
-        if len(imu) == 6:
-            gx, gy, gz = imu[3], imu[4], imu[5]
-            gx = gx if abs(gx) > GYRO_DEADZONE else 0.0
-            gy = gy if abs(gy) > GYRO_DEADZONE else 0.0
-            gz = gz if abs(gz) > GYRO_DEADZONE else 0.0
-            if abs(gx) > 0.01 or abs(gy) > 0.01 or abs(gz) > 0.01:
-                rx = round(gx * IMU_SEND_INTERVAL * GYRO_SCALE, 8)
-                ry = round(gy * IMU_SEND_INTERVAL * GYRO_SCALE, 8)
-                rz = round(gz * IMU_SEND_INTERVAL * GYRO_SCALE, 8)
-                await broadcast_ar({
-                    "type": "execute",
-                    "code": (
-                        f"scene.children.filter(c=>c.isMesh).forEach(c=>{{"
-                        f"c.rotation.x+={rx};"
-                        f"c.rotation.y+={ry};"
-                        f"c.rotation.z+={rz};"
-                        f"}});"
-                    ),
-                })
+    # ── Update edge-detection state ──
+    prev_buttons = {k: bool(buttons.get(k, False)) for k in prev_buttons}
 
 
 # ─── UDP Controller Protocol ─────────────────────────────────────────────────
@@ -790,7 +798,8 @@ async def ar_websocket(ws: WebSocket):
             msg_type = message.get("type")
 
             if msg_type == "voice" and message.get("final"):
-                await process_voice_command(message["text"])
+                selected_object = message.get("selectedObject", "")
+                await process_voice_command(message["text"], selected_object)
 
             elif msg_type == "scene_state":
                 global current_scene_manifest, pending_voice_save
@@ -823,6 +832,16 @@ async def ar_websocket(ws: WebSocket):
 
             elif msg_type == "ping":
                 await ws.send_text(json.dumps({"type": "pong"}))
+
+            elif msg_type == "request_undo":
+                global version_index
+                if version_index > 0:
+                    version_index -= 1
+                    await broadcast_ar({
+                        "type": "load_state",
+                        "data": versions[version_index]["scene_data"],
+                    })
+                    log.info(f"request_undo → version {versions[version_index]['version']}")
 
             elif msg_type == "request_state":
                 if version_index >= 0:

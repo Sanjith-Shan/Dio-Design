@@ -478,6 +478,9 @@ const state = {
   avatar:null, voiceAn: new VoiceAnalyzer(),
   listening:false, recognition:null, gltfLoader: new GLTFLoader(),
   expectingAudio: false, vrMode: false,
+  selectedObject: null, pickModeActive: false,
+  billboardMesh: null, billboardCtx: null,
+  vrAutoPlaceTimer: null,
 };
 
 const $=(id)=>document.getElementById(id);
@@ -511,8 +514,26 @@ console.log = function(...args) {
 };
 
 let bubbleTO=null;
-function showBubble(t,ms=0){ dom.bubble.textContent=t; dom.bubble.classList.add('visible'); if(bubbleTO)clearTimeout(bubbleTO); if(ms>0)bubbleTO=setTimeout(hideBubble,ms); }
-function hideBubble(){ dom.bubble.classList.remove('visible'); }
+function updateBillboard(t){
+  if(!state.billboardCtx||!state.billboardMesh) return;
+  const ctx=state.billboardCtx, w=512, h=128;
+  ctx.clearRect(0,0,w,h);
+  if(!t){ state.billboardMesh.visible=false; state.billboardMesh.material.map.needsUpdate=true; return; }
+  ctx.fillStyle='rgba(0,0,0,0.65)';
+  ctx.beginPath(); ctx.rect(4,4,w-8,h-8); ctx.fill();
+  ctx.fillStyle='#c0ddff'; ctx.font='bold 26px Arial';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  // simple word-wrap
+  const words=t.split(' '); let line='', lines=[];
+  for(const w2 of words){ const test=line+w2+' '; if(ctx.measureText(test).width>480&&line){lines.push(line.trim());line=w2+' ';}else line=test; }
+  if(line.trim()) lines.push(line.trim());
+  const lh=34, sy=64-((lines.length-1)*lh/2);
+  lines.forEach((l,i)=>ctx.fillText(l,256,sy+i*lh));
+  state.billboardMesh.material.map.needsUpdate=true;
+  state.billboardMesh.visible=true;
+}
+function showBubble(t,ms=0){ dom.bubble.textContent=t; dom.bubble.classList.add('visible'); updateBillboard(t); if(bubbleTO)clearTimeout(bubbleTO); if(ms>0)bubbleTO=setTimeout(hideBubble,ms); }
+function hideBubble(){ dom.bubble.classList.remove('visible'); updateBillboard(''); }
 
 function handleMsg(m){
   const av = state.avatar;
@@ -576,6 +597,87 @@ function handleMsg(m){
         child.material.emissiveIntensity = m.active ? 0.3 : 0;
       }
     });
+  }
+
+  // ── PTT from controller ──
+  if(m.type==='ptt'){
+    if(m.active){
+      console.log('SPEECH: PTT pressed, starting recognition');
+      if(!state.listening && state.recognition){
+        state.listening=true;
+        dom.micBtn.classList.add('listening');
+        state.avatar?.setListening();
+        try{ state.recognition.start(); }catch(x){ console.log('SPEECH: PTT start error:',x.message); }
+      }
+    } else {
+      console.log('SPEECH: PTT released, stopping recognition');
+      if(state.listening && state.recognition){
+        state.recognition.stop();
+        // onend cleans up state.listening and UI
+      }
+    }
+  }
+
+  // ── Pick/select from controller ──
+  if(m.type==='pick_toggle' && state.scene){
+    const SKIP_NAMES=new Set(['ground_plane','model-anchor','dio-avatar','__reticle__','__billboard__']);
+    if(!state.pickModeActive){
+      // Enter pick mode — raycast from camera center to find nearest object
+      const ray=new THREE.Raycaster();
+      ray.setFromCamera(new THREE.Vector2(0,0), state.camera);
+      const candidates=[];
+      state.scene.traverse(obj=>{
+        if(obj.isMesh&&!SKIP_NAMES.has(obj.name)){
+          let top=obj; while(top.parent&&top.parent!==state.scene) top=top.parent;
+          if(!SKIP_NAMES.has(top.name)&&!candidates.includes(top)) candidates.push(top);
+        }
+      });
+      const hits=ray.intersectObjects(candidates,true);
+      if(hits.length){
+        let tgt=hits[0].object;
+        while(tgt.parent&&tgt.parent!==state.scene) tgt=tgt.parent;
+        state.selectedObject=tgt.name||null;
+        state.pickModeActive=true;
+        tgt.traverse(c=>{
+          if(c.isMesh&&c.material&&!SKIP_NAMES.has(c.name)){
+            c.userData._prevEmissive=c.material.emissive?.getHex()??0;
+            c.userData._prevEmissiveInt=c.material.emissiveIntensity??0;
+            c.material.emissive=new THREE.Color(0x4488ff);
+            c.material.emissiveIntensity=0.35;
+          }
+        });
+        showBubble(`Selected: ${state.selectedObject}`,2500);
+      } else {
+        showBubble('Nothing in view to select',2000);
+      }
+    } else {
+      // Exit pick mode — remove highlight
+      if(state.selectedObject){
+        const obj=state.scene.getObjectByName(state.selectedObject);
+        if(obj) obj.traverse(c=>{
+          if(c.isMesh&&c.material&&c.userData._prevEmissive!==undefined){
+            c.material.emissive=new THREE.Color(c.userData._prevEmissive);
+            c.material.emissiveIntensity=c.userData._prevEmissiveInt??0;
+          }
+        });
+      }
+      state.pickModeActive=false; state.selectedObject=null;
+      showBubble('Selection cleared',1500);
+    }
+  }
+
+  // ── Controller scale ──
+  if(m.type==='controller_scale' && state.scene){
+    const f=m.factor;
+    const SKIP_S=new Set(['ground_plane','model-anchor','dio-avatar','__reticle__','__billboard__']);
+    if(state.selectedObject){
+      const obj=state.scene.getObjectByName(state.selectedObject);
+      if(obj) obj.scale.multiplyScalar(f);
+    } else {
+      state.scene.children.forEach(obj=>{
+        if(!SKIP_S.has(obj.name)&&!obj.isLight&&!obj.isCamera) obj.scale.multiplyScalar(f);
+      });
+    }
   }
 }
 
@@ -641,7 +743,7 @@ function getGeometryParams(geo) {
 }
 
 function serializeScene() {
-  const SKIP = new Set(['ground_plane', 'model-anchor', 'dio-avatar', '__reticle__']);
+  const SKIP = new Set(['ground_plane', 'model-anchor', 'dio-avatar', '__reticle__', '__billboard__']);
   const objects = [];
 
   state.scene.children.forEach(obj => {
@@ -707,7 +809,7 @@ function reconstructMesh(od) {
 
 function loadSceneState(data) {
   if (!state.scene || !data?.objects) return;
-  const SKIP = new Set(['ground_plane', 'model-anchor', 'dio-avatar', '__reticle__']);
+  const SKIP = new Set(['ground_plane', 'model-anchor', 'dio-avatar', '__reticle__', '__billboard__']);
 
   // Remove all user objects from scene top level
   const toRemove = state.scene.children.filter(obj => {
@@ -774,7 +876,7 @@ function initVoice(){
     }
     console.log('SPEECH: got result:', fin||int);
     dom.transcript.textContent=int||fin;
-    if(fin){ send({type:'voice',text:fin.trim(),final:true}); dom.transcript.textContent=''; }
+    if(fin){ send({type:'voice',text:fin.trim(),final:true, selectedObject: state.selectedObject||''}); dom.transcript.textContent=''; }
   };
   r.onerror=(e)=>{ console.log('SPEECH: error:', e.error); if(e.error==='not-allowed') showBubble('Mic access denied',3000); };
   r.onend=()=>{
@@ -863,6 +965,21 @@ async function initXR(mode='ar'){
 
   const avatar = new DioAvatar();
   anc.add(avatar.group);
+
+  // 3D billboard — canvas texture plane above Dio, always faces camera
+  const _bbCanvas = document.createElement('canvas');
+  _bbCanvas.width=512; _bbCanvas.height=128;
+  const _bbCtx = _bbCanvas.getContext('2d');
+  const _bbTex = new THREE.CanvasTexture(_bbCanvas);
+  const _bbMesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.28, 0.07),
+    new THREE.MeshBasicMaterial({map:_bbTex, transparent:true, side:THREE.DoubleSide, depthWrite:false})
+  );
+  _bbMesh.name='__billboard__'; _bbMesh.visible=false;
+  _bbMesh.position.set(0.15, 0.32, 0.05);
+  anc.add(_bbMesh);
+  state.billboardMesh=_bbMesh; state.billboardCtx=_bbCtx;
+
   state.avatar=avatar; state.scene=scene; state.camera=cam; state.renderer=ren; state.reticle=ret;
 
   // Pre-initialize the SpeechRecognition object while the user gesture is still active,
@@ -954,7 +1071,7 @@ async function initXR(mode='ar'){
       }
     });
     sess.addEventListener('end',()=>{
-      state.xrSession=null; state.vrMode=false; state.modelPlaced=false;
+      state.xrSession=null; state.vrMode=false; state.modelPlaced=false; state.vrAutoPlaceTimer=null;
       dom.landing.style.display='flex'; dom.overlay.classList.remove('active');
       dom.startBtn.disabled=false; dom.startBtn.textContent='Enter AR';
       dom.vrBtn.disabled=false; dom.vrBtn.textContent='Enter VR';
@@ -989,8 +1106,26 @@ async function initXR(mode='ar'){
         if(state.modelPlaced){
           const _cw=new THREE.Vector3(); cam.getWorldPosition(_cw);
           const _aw=new THREE.Vector3(); state.avatar.group.getWorldPosition(_aw);
-          _cw.y=_aw.y; // flatten to same height so avatar doesn't tilt up/down
+          _cw.y=_aw.y;
           state.avatar.group.lookAt(_cw);
+          // Billboard faces camera
+          if(state.billboardMesh&&state.billboardMesh.visible) state.billboardMesh.lookAt(_cw);
+        }
+      }
+
+      // VR auto-place: spawn workspace automatically 1.5s after session starts
+      if(state.vrMode && !state.modelPlaced){
+        if(!state.vrAutoPlaceTimer) state.vrAutoPlaceTimer = time + 1500;
+        if(time >= state.vrAutoPlaceTimer){
+          const _cp2=new THREE.Vector3(), _cd2=new THREE.Vector3();
+          cam.getWorldPosition(_cp2); cam.getWorldDirection(_cd2);
+          anc.position.copy(_cp2).addScaledVector(_cd2, 1.2);
+          anc.matrixAutoUpdate=true; anc.visible=true;
+          state.modelPlaced=true; ret.visible=false;
+          dom.placeHint.style.opacity='0';
+          send({type:'request_model'});
+          state.vrAutoPlaceTimer=null;
+          showBubble('Workspace placed — press pick button to talk',3000);
         }
       }
       const t = time / 1000;
