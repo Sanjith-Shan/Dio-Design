@@ -70,6 +70,7 @@
     width:60px;height:60px;border-radius:50%;
     border:2px solid rgba(136,204,255,0.4);background:rgba(136,204,255,0.1);
     color:#88ccff;display:flex;align-items:center;justify-content:center;cursor:pointer;
+    pointer-events:auto;position:relative;z-index:9999;touch-action:manipulation;
   }
   #mic-btn.listening { border-color:#ff6688;background:rgba(255,102,136,0.15);color:#ff6688;box-shadow:0 0 20px rgba(255,102,136,0.2); }
   #mic-btn svg { width:26px;height:26px;fill:currentColor; }
@@ -659,12 +660,15 @@ function exportSceneAsGLB() {
   }, (err) => console.error('GLTFExporter error:', err), { binary: true });
 }
 
-// Voice
+// Voice — push-to-talk
 function initVoice(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   console.log('SPEECH: initVoice called, SR available:', !!SR);
   if(!SR)return;
-  const r=new SR(); r.continuous=true; r.interimResults=true; r.lang='en-US';
+  const r=new SR();
+  r.continuous=false;       // single utterance per tap
+  r.interimResults=true;
+  r.lang='en-US';
   r.onstart=()=>{ console.log('SPEECH: recognition active'); };
   r.onresult=(e)=>{
     let fin='',int='';
@@ -677,16 +681,36 @@ function initVoice(){
     if(fin){ send({type:'voice',text:fin.trim(),final:true}); dom.transcript.textContent=''; }
   };
   r.onerror=(e)=>{ console.log('SPEECH: error:', e.error); if(e.error==='not-allowed') showBubble('Mic access denied',3000); };
-  r.onend=()=>{ console.log('SPEECH: ended, restarting:', state.listening); if(state.listening) try{r.start();}catch(x){} };
+  r.onend=()=>{
+    console.log('SPEECH: ended, listening was:', state.listening);
+    // Reset to inactive — no auto-restart
+    state.listening=false;
+    dom.micBtn.classList.remove('listening');
+    state.avatar?.setIdle();
+  };
   state.recognition=r;
 }
 function toggleMic(){
-  if(!state.recognition){initVoice();if(!state.recognition)return;}
-  state.listening=!state.listening;
-  if(state.listening){ state.recognition.start(); state.voiceAn.start(); dom.micBtn.classList.add('listening'); state.avatar?.setListening(); }
-  else{ state.recognition.stop(); state.voiceAn.stop(); dom.micBtn.classList.remove('listening'); state.avatar?.setIdle(); dom.transcript.textContent=''; }
+  if(!state.recognition){ initVoice(); if(!state.recognition)return; }
+  if(!state.listening){
+    // Start listening
+    state.listening=true;
+    dom.micBtn.classList.add('listening');
+    state.avatar?.setListening();
+    state.avatar?.setVoiceLevel(0.15);
+    console.log('SPEECH: recognition.start() called');
+    try{ state.recognition.start(); }catch(x){ console.log('SPEECH: start error:', x.message); }
+  } else {
+    // Stop early (user tapped again before speech ended)
+    state.listening=false;
+    state.recognition.stop();
+    // state.voiceAn.stop(); // analyzer disabled for now
+    dom.micBtn.classList.remove('listening');
+    state.avatar?.setIdle();
+    state.avatar?.setVoiceLevel(0);
+  }
 }
-dom.micBtn.addEventListener('click',(e)=>{e.stopPropagation();toggleMic();});
+dom.micBtn.addEventListener('click',(e)=>{ e.stopPropagation(); e.preventDefault(); toggleMic(); });
 
 let longPressTimer = null;
 
@@ -722,16 +746,9 @@ async function initXR(){
   anc.add(avatar.group);
   state.avatar=avatar; state.scene=scene; state.camera=cam; state.renderer=ren; state.reticle=ret;
 
-  // Start voice recognition NOW, while the "Enter AR" button click user gesture is still active.
-  // Must be before any await — Chrome Android requires a user gesture for SpeechRecognition.start().
+  // Pre-initialize the SpeechRecognition object while the user gesture is still active,
+  // but do NOT start() yet — user will tap the mic button to begin push-to-talk.
   initVoice();
-  if(state.recognition){
-    state.listening = true;
-    state.recognition.start();
-    console.log('SPEECH: recognition.start() called');
-    state.voiceAn.start();
-    dom.micBtn.classList.add('listening');
-  }
 
   try{
     const sess = await navigator.xr.requestSession('immersive-ar',{
@@ -785,7 +802,7 @@ async function initXR(){
       }
 
       if(state.avatar){
-        state.avatar.setVoiceLevel(state.listening?state.voiceAn.getLevel():0);
+        state.avatar.setVoiceLevel(state.listening ? 0.15 : 0);
         state.avatar.update(dt, time/1000);
       }
       const t = time / 1000;
