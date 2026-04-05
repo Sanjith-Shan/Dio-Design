@@ -531,7 +531,22 @@ function handleMsg(m){
   if(m.type==='audio') state.expectingAudio=true;
   if(m.type==='execute' && m.code && state.scene){
     try {
+      // Snapshot existing top-level object UUIDs before execution
+      const _preUUIDs = new Set(state.scene.children.map(c=>c.uuid));
       new Function('THREE','scene','camera','renderer','GLTFLoader', m.code)(THREE, state.scene, state.camera, state.renderer, GLTFLoader);
+      // In VR mode: offset any newly added scene-root objects to the anchor position
+      // so they appear at the placed workspace, not at the XR origin
+      if(state.vrMode && state.modelPlaced){
+        const _anc=state.scene.getObjectByName('model-anchor');
+        if(_anc){
+          const _skip=new Set(['__reticle__','model-anchor','ground_plane']);
+          state.scene.children.forEach(child=>{
+            if(!_preUUIDs.has(child.uuid)&&!child.isLight&&!child.isCamera&&!_skip.has(child.name)){
+              child.position.add(_anc.position);
+            }
+          });
+        }
+      }
       const sceneData = serializeScene();
       const manifest = sceneData.objects.map(o => ({ name: o.name, type: o.type || 'mesh' }));
       send({ type: 'scene_state', data: sceneData, manifest });
@@ -939,7 +954,8 @@ async function initXR(mode='ar'){
       }
     });
     sess.addEventListener('end',()=>{
-      state.xrSession=null; dom.landing.style.display='flex'; dom.overlay.classList.remove('active');
+      state.xrSession=null; state.vrMode=false; state.modelPlaced=false;
+      dom.landing.style.display='flex'; dom.overlay.classList.remove('active');
       dom.startBtn.disabled=false; dom.startBtn.textContent='Enter AR';
       dom.vrBtn.disabled=false; dom.vrBtn.textContent='Enter VR';
       if(state.recognition && state.listening){
@@ -969,6 +985,13 @@ async function initXR(mode='ar'){
       if(state.avatar){
         state.avatar.setVoiceLevel(state.listening ? 0.15 : 0);
         state.avatar.update(dt, time/1000);
+        // Keep Dio facing the user — rotate on Y only so it doesn't tilt
+        if(state.modelPlaced){
+          const _cw=new THREE.Vector3(); cam.getWorldPosition(_cw);
+          const _aw=new THREE.Vector3(); state.avatar.group.getWorldPosition(_aw);
+          _cw.y=_aw.y; // flatten to same height so avatar doesn't tilt up/down
+          state.avatar.group.lookAt(_cw);
+        }
       }
       const t = time / 1000;
       state.scene.children.forEach(child => {
@@ -986,8 +1009,11 @@ async function initXR(mode='ar'){
       if(!state.xrSession || !state.modelPlaced) return;
       longPressTimer = setTimeout(()=>{
         state.modelPlaced=false;
+        ret.visible=false;
+        if(state.vrMode) ret.matrixAutoUpdate=true;
         dom.placeHint.style.opacity='1';
-        showBubble('Tap a surface to reposition',3000);
+        dom.placeHint.textContent = state.vrMode ? 'Look forward and tap to reposition' : 'Point at a surface and tap to place your workspace';
+        showBubble('Long press released — tap to reposition',3000);
       },500);
     },{passive:true});
     document.addEventListener('touchend',()=>clearTimeout(longPressTimer),{passive:true});
