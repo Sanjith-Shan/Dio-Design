@@ -477,7 +477,7 @@ const state = {
   reticle:null, currentModel:null, modelPlaced:false,
   avatar:null, voiceAn: new VoiceAnalyzer(),
   listening:false, recognition:null, gltfLoader: new GLTFLoader(),
-  expectingAudio: false,
+  expectingAudio: false, vrMode: false,
 };
 
 const $=(id)=>document.getElementById(id);
@@ -902,7 +902,11 @@ async function initXR(mode='ar'){
     ren.xr.setReferenceSpaceType('local');
     await ren.xr.setSession(sess);
     state.xrSession = sess;
+    state.vrMode = (mode === 'vr');
+    // In VR mode the reticle is repositioned every frame via position — needs auto-update enabled
+    if(state.vrMode) ret.matrixAutoUpdate = true;
     dom.landing.style.display='none'; dom.overlay.classList.add('active');
+    if(state.vrMode) dom.placeHint.textContent = 'Look forward and tap to place your workspace';
 
     const vs = await sess.requestReferenceSpace('viewer');
     state.localRef = await sess.requestReferenceSpace('local');
@@ -917,12 +921,20 @@ async function initXR(mode='ar'){
           e.inputSource.gamepad?.axes[1] ?? 0
         )?.closest('#ar-overlay *:not(canvas)')) return;
       if(!state.modelPlaced && ret.visible){
-        anc.matrix.copy(ret.matrix); anc.matrixAutoUpdate=false; anc.visible=true;
+        if(state.vrMode){
+          // VR: copy the reticle's current world position into the anchor
+          anc.position.copy(ret.position);
+          anc.matrixAutoUpdate=true;
+        } else {
+          anc.matrix.copy(ret.matrix); anc.matrixAutoUpdate=false;
+        }
+        anc.visible=true;
         state.modelPlaced=true;
+        ret.visible=false;
         if(state.currentModel) anc.add(state.currentModel);
         dom.placeHint.style.opacity='0';
         send({type:'request_model'});
-        const anc2 = state.scene.getObjectByName('model-anchor');
+        const anc2=state.scene.getObjectByName('model-anchor');
         if(anc2) send({type:'place_model',position:[anc2.position.x,anc2.position.y,anc2.position.z]});
       }
     });
@@ -945,6 +957,13 @@ async function initXR(mode='ar'){
         const hr=frame.getHitTestResults(state.hitTestSource);
         if(hr.length){const p=hr[0].getPose(state.localRef);if(p){ret.visible=true;ret.matrix.fromArray(p.transform.matrix);}}
         else ret.visible=false;
+      } else if(state.vrMode && !state.modelPlaced){
+        // No hit-test in VR — float the reticle 1.2m forward along the camera's look direction
+        const _cp=new THREE.Vector3(), _cd=new THREE.Vector3();
+        cam.getWorldPosition(_cp); cam.getWorldDirection(_cd);
+        ret.position.copy(_cp).addScaledVector(_cd,1.2);
+        ret.rotation.x=-Math.PI/2;
+        ret.visible=true;
       }
 
       if(state.avatar){
