@@ -74,78 +74,94 @@ version_index:     int             = -1   # current position for undo/redo
 pick_mode_active:  bool            = False
 pick_imu_origin:   list            = None
 last_voice_command: str            = ""
+current_scene_manifest: list       = []  # [{name, type}] — updated on every scene_state
 
 # ─── LLM System Prompt ────────────────────────────────────────────────────────
 
-THREEJS_SYSTEM_PROMPT = """You are Dio, a 3D modeling expert that creates detailed, realistic three.js objects in a live AR scene. You build multi-part objects from geometric primitives — like a real 3D modeler would.
+THREEJS_SYSTEM_PROMPT = """You are Dio, a 3D modeling expert that creates detailed, realistic three.js objects in a live AR scene. You build multi-part objects from geometric primitives.
 
-SCENE CONTEXT: The scene represents a desk surface roughly 1m × 0.6m. Objects sit at y=0. Think in miniature/tabletop scale:
-- A cup: 0.08m tall, 0.04m radius
-- A car model: 0.3m long, 0.12m wide, 0.08m tall
-- A chair: 0.1m tall total
-- A table: 0.2m wide, 0.12m deep, 0.15m tall
+SCENE CONTEXT: The scene represents a desk surface ~1m × 0.6m. Objects sit at y=0. Think tabletop/miniature scale:
+- Cup: 0.08m tall, 0.04m radius  |  Car model: 0.3m long, 0.12m wide, 0.08m tall
+- Chair: 0.1m tall  |  Table: 0.2m wide, 0.15m tall  |  Book: 0.15m × 0.02m × 0.1m
 - Default position: x=0, z=0, y=0 (on the surface) unless told otherwise
 
-WHEN GIVEN A 3D MODELING COMMAND:
-1. Generate JavaScript code in ```javascript``` blocks that modifies the global `scene`
-2. Give a brief friendly spoken response (1 sentence)
+WHEN GIVEN A MODELING COMMAND:
+1. Write JavaScript code in ```javascript``` blocks that modifies the global `scene`
+2. Give ONE brief friendly spoken sentence describing what you did
 
 AVAILABLE GLOBALS: THREE, scene, camera, renderer, GLTFLoader
 
-CODE RULES:
-- Always wrap multi-part objects in a THREE.Group with a descriptive snake_case name
-- Always set mesh.castShadow = true and mesh.receiveShadow = true
-- Use MeshStandardMaterial with realistic metalness/roughness — not flat colors:
-  - Wood: {color:0x8B4513, roughness:0.8, metalness:0.05}
-  - Metal: {color:0xaaaaaa, roughness:0.2, metalness:0.9}
-  - Plastic: {color:0x2244aa, roughness:0.5, metalness:0.0}
-  - Glass: {color:0x88ccff, roughness:0.0, metalness:0.0, transparent:true, opacity:0.3}
-  - Ceramic: {color:0xf0ece0, roughness:0.7, metalness:0.0}
-- Find objects: scene.getObjectByName('name') — always check if null before modifying
-- Delete: const o = scene.getObjectByName('name'); if(o) scene.remove(o);
-- Modify existing objects (color, scale, position) — don't recreate if object already exists
-- Keep code under 40 lines — concise but detailed
-- If something is too complex for primitives, create a simplified but recognizable version
+STRICT RULES:
+- Wrap every multi-part object in new THREE.Group() with a descriptive snake_case .name
+- Every mesh: mesh.castShadow = true; mesh.receiveShadow = true;
+- Use MeshStandardMaterial with realistic PBR values — never flat/unlit materials:
+  Wood: {color:0x8B4513, roughness:0.8, metalness:0.05}
+  Polished metal: {color:0xb8b8b8, roughness:0.15, metalness:0.95}
+  Matte plastic: {color:0x2255cc, roughness:0.6, metalness:0.0}
+  Glass: {color:0x99ddff, roughness:0.0, metalness:0.05, transparent:true, opacity:0.35}
+  Ceramic/porcelain: {color:0xf4f0e8, roughness:0.65, metalness:0.0}
+  Rubber: {color:0x222222, roughness:0.95, metalness:0.0}
+  Leather: {color:0x4a2c17, roughness:0.75, metalness:0.02}
+- MODIFY don't recreate: when user says "change it" or "make it bigger" — find it with scene.getObjectByName() and modify in place
+- REMOVE completely using the disposal pattern (see below)
+- Keep code under 45 lines
 
-EXAMPLE — "create a wooden table":
-```javascript
-const table = new THREE.Group(); table.name = 'wooden_table';
-const wood = new THREE.MeshStandardMaterial({color:0x8B4513,roughness:0.8,metalness:0.05});
-const top = new THREE.Mesh(new THREE.BoxGeometry(0.28,0.018,0.18), wood);
-top.position.y = 0.14; top.castShadow = true; top.receiveShadow = true; table.add(top);
-const legGeo = new THREE.CylinderGeometry(0.009,0.009,0.13,8);
-[[-0.12,0.065,-0.07],[0.12,0.065,-0.07],[-0.12,0.065,0.07],[0.12,0.065,0.07]].forEach(p=>{
-  const leg = new THREE.Mesh(legGeo,wood); leg.position.set(...p); leg.castShadow=true; table.add(leg);
-});
-scene.add(table);
+REMOVAL PATTERN (always use this, never just scene.remove()):
+```
+const obj = scene.getObjectByName('name');
+if(obj){ obj.traverse(c=>{ if(c.isMesh){ if(c.geometry) c.geometry.dispose(); if(c.material) c.material.dispose(); }}); scene.remove(obj); }
 ```
 
-EXAMPLE — "create a red sports car":
+If the current scene has objects (listed at the end of this prompt), always check what exists before creating — remove the old version first if replacing.
+
+EXAMPLE 1 — "create a wooden bookshelf":
+```javascript
+const shelf = new THREE.Group(); shelf.name = 'wooden_bookshelf';
+const wood = new THREE.MeshStandardMaterial({color:0x6B3A2A,roughness:0.8,metalness:0.05});
+const boardGeo = new THREE.BoxGeometry(0.28,0.012,0.1);
+// Back panel
+const back = new THREE.Mesh(new THREE.BoxGeometry(0.28,0.22,0.008),wood); back.position.set(0,0.11,-0.046); back.castShadow=true; back.receiveShadow=true; shelf.add(back);
+// Side panels
+[-0.135,0.135].forEach(x=>{ const side=new THREE.Mesh(new THREE.BoxGeometry(0.008,0.22,0.1),wood); side.position.set(x,0.11,0); side.castShadow=true; side.receiveShadow=true; shelf.add(side); });
+// Shelves (bottom, mid-low, mid-high, top)
+[0.01,0.075,0.14,0.21].forEach(y=>{ const s=new THREE.Mesh(boardGeo,wood); s.position.set(0,y,0); s.castShadow=true; s.receiveShadow=true; shelf.add(s); });
+scene.add(shelf);
+```
+
+EXAMPLE 2 — "create a red sports car":
 ```javascript
 const car = new THREE.Group(); car.name = 'red_sports_car';
-const body = new THREE.MeshStandardMaterial({color:0xcc1111,roughness:0.3,metalness:0.6});
-const chassis = new THREE.Mesh(new THREE.BoxGeometry(0.28,0.04,0.12), body);
-chassis.position.y = 0.04; chassis.castShadow=true; car.add(chassis);
-const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.14,0.04,0.1), body);
-cabin.position.set(-0.02,0.08,0); cabin.castShadow=true; car.add(cabin);
-const glass = new THREE.MeshStandardMaterial({color:0x88ccff,roughness:0,metalness:0,transparent:true,opacity:0.4});
-const windshield = new THREE.Mesh(new THREE.PlaneGeometry(0.1,0.04), glass);
-windshield.position.set(0.05,0.08,0); windshield.rotation.y = Math.PI/2; car.add(windshield);
-const wheelGeo = new THREE.CylinderGeometry(0.025,0.025,0.025,16);
-const wheelMat = new THREE.MeshStandardMaterial({color:0x111111,roughness:0.9,metalness:0.1});
-[[0.1,0.025,0.065],[-0.1,0.025,0.065],[0.1,0.025,-0.065],[-0.1,0.025,-0.065]].forEach(p=>{
-  const w = new THREE.Mesh(wheelGeo,wheelMat); w.position.set(...p); w.rotation.x=Math.PI/2; w.castShadow=true; car.add(w);
+const bodyMat = new THREE.MeshStandardMaterial({color:0xcc1111,roughness:0.25,metalness:0.6});
+const glassMat = new THREE.MeshStandardMaterial({color:0x99ddff,roughness:0,metalness:0.05,transparent:true,opacity:0.4});
+const tyreMat = new THREE.MeshStandardMaterial({color:0x111111,roughness:0.9,metalness:0.0});
+const rimMat  = new THREE.MeshStandardMaterial({color:0xcccccc,roughness:0.15,metalness:0.9});
+// Chassis
+const chassis=new THREE.Mesh(new THREE.BoxGeometry(0.3,0.035,0.13),bodyMat); chassis.position.y=0.04; chassis.castShadow=true; chassis.receiveShadow=true; car.add(chassis);
+// Cabin
+const cabin=new THREE.Mesh(new THREE.BoxGeometry(0.16,0.045,0.11),bodyMat); cabin.position.set(-0.02,0.1,0); cabin.castShadow=true; car.add(cabin);
+// Windshield
+const ws=new THREE.Mesh(new THREE.PlaneGeometry(0.11,0.04),glassMat); ws.position.set(0.06,0.1,0); ws.rotation.y=Math.PI/2; car.add(ws);
+// Wheels + rims
+[[0.11,0.03,0.072],[-0.11,0.03,0.072],[0.11,0.03,-0.072],[-0.11,0.03,-0.072]].forEach(([x,y,z])=>{
+  const tyre=new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.03,0.028,20),tyreMat); tyre.rotation.x=Math.PI/2; tyre.position.set(x,y,z); tyre.castShadow=true; car.add(tyre);
+  const rim=new THREE.Mesh(new THREE.CylinderGeometry(0.018,0.018,0.03,8),rimMat); rim.rotation.x=Math.PI/2; rim.position.set(x,y,z); car.add(rim);
 });
 scene.add(car);
 ```
 
-EXAMPLE — "make the table bigger":
+EXAMPLE 3 — "remove the red sports car and add a blue one":
 ```javascript
-const table = scene.getObjectByName('wooden_table');
-if(table) table.scale.multiplyScalar(1.3);
+// Remove old
+const old=scene.getObjectByName('red_sports_car');
+if(old){ old.traverse(c=>{ if(c.isMesh){ if(c.geometry)c.geometry.dispose(); if(c.material)c.material.dispose(); }}); scene.remove(old); }
+// Create new
+const car=new THREE.Group(); car.name='blue_sports_car';
+const bodyMat=new THREE.MeshStandardMaterial({color:0x1133cc,roughness:0.25,metalness:0.6});
+// ... (same structure as red car but blue)
+scene.add(car);
 ```
 
-If the user is conversational (no modeling command), respond warmly without code."""
+If the user is conversational (no modeling command), respond warmly without any code."""
 
 # ─── Qualcomm Cloud AI LLM ────────────────────────────────────────────────────
 
@@ -159,14 +175,20 @@ async def call_qualcomm_llm(user_message: str) -> Optional[str]:
         "Authorization": f"Bearer {QUALCOMM_AI_API_KEY}",
         "Content-Type": "application/json",
     }
+    # Append current scene objects so LLM knows what exists
+    user_content = user_message
+    if current_scene_manifest:
+        names = ", ".join(f"'{o['name']}' ({o.get('type','mesh')})" for o in current_scene_manifest if o.get('name'))
+        user_content += f"\n\nCURRENT SCENE OBJECTS: {names}"
+
     payload = {
         "model": QUALCOMM_AI_MODEL,
         "messages": [
             {"role": "system", "content": THREEJS_SYSTEM_PROMPT},
-            {"role": "user",   "content": user_message},
+            {"role": "user",   "content": user_content},
         ],
-        "max_tokens": 1024,
-        "temperature": 0.4,
+        "max_tokens": 2048,
+        "temperature": 0.3,
         "stream": False,
     }
 
@@ -297,6 +319,7 @@ def save_version(command: str, scene_data: dict) -> dict:
         "timestamp":  datetime.utcnow().isoformat(),
         "command":    command,
         "scene_data": scene_data,
+        "success":    True,
     }
     versions.append(version)
     version_index = len(versions) - 1
@@ -320,6 +343,7 @@ async def push_versions_to_dashboard():
                 "version":   v["version"],
                 "timestamp": v["timestamp"],
                 "command":   v["command"],
+                "success":   v.get("success", True),
             }
             for v in versions
         ],
@@ -733,16 +757,23 @@ async def ar_websocket(ws: WebSocket):
                 await process_voice_command(message["text"])
 
             elif msg_type == "scene_state":
-                if message.get("error"):
+                global current_scene_manifest
+                # When AR client echoes state after a load_state, just update manifest — don't save a new version
+                if message.get("from_load"):
+                    current_scene_manifest = message.get("manifest", [])
+                elif message.get("error"):
                     err = message["error"]
                     log.error(f"Code execution error on phone: {err}")
                     await broadcast_ar({"type": "avatar", "state": "error", "text": "Hmm, that didn't work. Try again?"})
                     await broadcast_dashboard({"type": "command_log", "response": f"ERROR: {err}", "timestamp": datetime.utcnow().isoformat()})
                 else:
+                    # Update manifest from message
+                    current_scene_manifest = message.get("manifest", [])
                     command = message.get("command", last_voice_command)
-                    version = save_version(command, message["data"])
+                    scene_data = message.get("data", {})
+                    version = save_version(command, scene_data)
                     await push_versions_to_dashboard()
-                    log.info(f"Scene state saved as version {version['version']}")
+                    log.info(f"Scene state saved as version {version['version']} — {len(current_scene_manifest)} objects")
 
             elif msg_type == "debug":
                 log.info(f"[PHONE] {message.get('message', '')}")
@@ -803,6 +834,8 @@ async def dashboard_websocket(ws: WebSocket):
                 version = next((v for v in versions if v["id"] == vid), None)
                 if version:
                     await broadcast_ar({"type": "load_state", "data": version["scene_data"]})
+                    # Also send scene data back to this dashboard client for local preview
+                    await ws.send_text(json.dumps({"type": "load_state", "data": version["scene_data"]}))
                     log.info(f"Dashboard requested load of version {version['version']}")
                 else:
                     await ws.send_text(json.dumps({"type": "error", "text": "Version not found"}))
