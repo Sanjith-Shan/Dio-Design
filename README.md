@@ -1,6 +1,6 @@
 # 🌟 Dio Design
 
-### 🏆 1st Place — Qualcomm Multi-Device Track: Build Across the Snapdragon Multiverse @ UCSD DiamondHacks
+🏆 1st Place — Qualcomm Multi-Device Track @ UCSD DiamondHacks
 
 > *Speak your design into existence.*
 
