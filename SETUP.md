@@ -2,7 +2,7 @@
 
 ## 1. Environment Setup
 
-Copy `.env.example` to `.env` and fill in:
+Copy `.env.example` to `.env` and fill in your credentials:
 
 ```bash
 cp .env.example .env
@@ -21,7 +21,6 @@ The system works WITHOUT these configured — it falls back to the built-in comm
 ipconfig
 
 # Install hub dependencies
-cd dio-design\hub
 pip install -r requirements.txt
 
 # Start hub server

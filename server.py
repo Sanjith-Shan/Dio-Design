@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import re
 import time
 import uuid
@@ -52,7 +53,7 @@ SSL_CERT_FILE        = os.getenv("SSL_CERT_FILE", "cert.pem")
 SSL_KEY_FILE         = os.getenv("SSL_KEY_FILE", "key.pem")
 VERSIONS_DIR         = Path(os.getenv("VERSIONS_DIR", "versions"))
 
-QUALCOMM_AI_API_URL  = "https://aisuite.cirrascale.com/apis/v2/chat/completions"
+QUALCOMM_AI_API_URL  = os.getenv("QUALCOMM_AI_API_URL", "https://aisuite.cirrascale.com/apis/v2/chat/completions")
 
 # IMU / controller constants
 IMU_SEND_INTERVAL    = 0.02    # 50 Hz firmware rate
@@ -89,7 +90,6 @@ controller_connected: bool         = False
 dio_busy:            bool          = False  # True while processing a voice command — suppresses idle chatter
 
 # ─── Personality Audio Lines ──────────────────────────────────────────────────
-import random
 
 # Punctuation guide (affects ElevenLabs delivery):
 #   comma      → short breath / beat
@@ -720,7 +720,7 @@ async def process_voice_command(text: str, selected_object: str = ""):
 
     await broadcast_ar({"type": "avatar", "state": "thinking", "text": "Thinking..."})
     # Fire thinking line immediately — user hears Dio respond before LLM returns
-    asyncio.ensure_future(broadcast_tts(thinking_line()))
+    asyncio.create_task(broadcast_tts(thinking_line()))
     await broadcast_dashboard({
         "type":      "command_log",
         "command":   text,
@@ -887,7 +887,7 @@ class ControllerUDPProtocol(asyncio.DatagramProtocol):
         try:
             msg = json.loads(data.decode("utf-8"))
             if msg.get("type") == "controller":
-                asyncio.ensure_future(process_controller_input(msg))
+                asyncio.create_task(process_controller_input(msg))
         except Exception as e:
             log.warning(f"Bad UDP packet from {addr}: {e}")
 
@@ -973,7 +973,7 @@ async def ar_websocket(ws: WebSocket):
 
     # Greet on first client connection
     if len(ar_clients) == 1:
-        asyncio.ensure_future(broadcast_tts(random.choice(GREETING_LINES)))
+        asyncio.create_task(broadcast_tts(random.choice(GREETING_LINES)))
 
     # Restore current scene state if any versions exist
     if version_index >= 0:
@@ -1009,7 +1009,7 @@ async def ar_websocket(ws: WebSocket):
                     pending_voice_save = False
                     err_text = error_line()
                     await broadcast_ar({"type": "avatar", "state": "error", "text": err_text})
-                    asyncio.ensure_future(broadcast_tts(err_text))
+                    asyncio.create_task(broadcast_tts(err_text))
                     await broadcast_dashboard({"type": "command_log", "response": f"ERROR: {err}", "timestamp": datetime.utcnow().isoformat()})
                 else:
                     # Always keep manifest current regardless of whether we save a version
@@ -1149,7 +1149,7 @@ async def startup():
     log.info("=" * 60)
 
     # Start idle chatter background task
-    asyncio.ensure_future(idle_chatter_loop())
+    asyncio.create_task(idle_chatter_loop())
 
     loop = asyncio.get_event_loop()
     try:

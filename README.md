@@ -119,18 +119,17 @@ Handheld AR mode with surface detection and tap-to-place, or stereo VR mode with
 
 ```
 Dio-Design/
-├── server.py           # FastAPI hub server — orchestrates everything
-├── index.html          # WebXR AR viewer — 3D scene, Dio avatar, voice input
-├── dashboard.html      # Designer dashboard — version history, 3D preview
-├── firmware.ino        # Arduino UNO Q MCU firmware (STM32/Zephyr)
-├── udp_sender.py       # UNO Q Linux-side UDP forwarder
-├── start.bat           # Windows startup script with env vars
-├── requirements.txt    # Python dependencies
-├── env.example         # Environment variable template
-├── ARCHITECTURE.md     # Detailed system architecture
-├── SETUP.md            # Setup and deployment guide
-├── CLAUDE.md           # AI assistant context file
-└── .gitignore
+├── server.py              # FastAPI hub server — orchestrates everything
+├── index.html             # WebXR AR viewer — 3D scene, Dio avatar, voice input
+├── dashboard.html         # Designer dashboard — version history, 3D preview
+├── controller/
+│   ├── firmware.ino       # Arduino UNO Q MCU firmware
+│   └── udp_sender.py      # UNO Q Linux-side UDP forwarder
+├── start.bat              # Windows startup script
+├── requirements.txt       # Python dependencies
+├── .env.example           # Environment variable template
+├── ARCHITECTURE.md        # Detailed system architecture
+└── SETUP.md               # Setup and deployment guide
 ```
 
 ---
@@ -155,13 +154,11 @@ pip install -r requirements.txt
 ### 2. Configure
 
 ```bash
-# Windows PowerShell
-$env:QUALCOMM_AI_API_KEY="your_cirrascale_api_key"
-$env:QUALCOMM_AI_API_URL="https://aisuite.cirrascale.com/apis/v2/chat/completions"
-$env:QUALCOMM_AI_MODEL="Llama-3.3-70B"
-$env:ELEVENLABS_API_KEY="your_elevenlabs_key"        # optional
-$env:ELEVENLABS_VOICE_ID="hmMWXCj9K7N5mCPcRkfC"     # optional
+cp .env.example .env
+# Edit .env with your Qualcomm Cloud AI key and (optionally) ElevenLabs key
 ```
+
+The system works without API keys — it falls back to the built-in command parser and skips voice output.
 
 ### 3. Run
 
