@@ -315,6 +315,6 @@ MIT
 ---
 
 <p align="center">
-  <em>Built in 48 hours at the Qualcomm Multiverse Hackathon</em><br>
+  <em>Built at UCSD Diamond Hacks</em><br>
   <strong>🌟 Speak your design into existence 🌟</strong>
 </p>
